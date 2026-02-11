@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bitcoin Portfolio Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>📊 Bitcoin Portfolio Dashboard</h1>
+      <p class="subtitle">Real-time tracking & analytics</p>
+    </header>
+
+    <main>
+      <section class="stats-grid">
+        <div class="stat-card">
+          <h3>Current BTC Price</h3>
+          <p class="stat-value" id="btc-price">Loading...</p>
+        </div>
+
+        <div class="stat-card">
+          <h3>Portfolio Value</h3>
+          <p class="stat-value" id="portfolio-value">Loading...</p>
+        </div>
+
+        <div class="stat-card">
+          <h3>Total BTC Held</h3>
+          <p class="stat-value" id="btc-held">Loading...</p>
+        </div>
+
+        <div class="stat-card">
+          <h3>Profit/Loss</h3>
+          <p class="stat-value" id="profit-loss">Loading...</p>
+        </div>
+      </section>
+
+      <section class="chart-section">
+        <h2>Price History (30 Days)</h2>
+        <canvas id="price-chart"></canvas>
+      </section>
+
+      <section class="holdings-section">
+        <h2>Current Holdings</h2>
+        <div id="holdings-table">
+          <p class="loading">Loading holdings...</p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>Last updated: <span id="last-update">Never</span></p>
+      <button id="refresh-btn">🔄 Refresh Data</button>
+    </footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
