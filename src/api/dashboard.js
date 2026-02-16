@@ -1,10 +1,14 @@
-const { getBitcoinPrice } = require('./bitcoin');
-const { 
+import { getBitcoinPrice } from './bitcoin.js';
+import { 
   getHoldings, 
   calculatePortfolioValue, 
   savePortfolioSnapshot,
   getPortfolioSnapshots 
-} = require('./database');
+} from './database.js';
+
+import { fileURLToPath } from 'url';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Update dashboard with latest data
 async function updateDashboard() {
@@ -62,7 +66,7 @@ async function getPortfolioHistory(days = 30) {
   }
 }
 
-module.exports = {
+export {
   updateDashboard,
   getDashboardData,
   getPortfolioHistory

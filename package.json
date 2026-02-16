@@ -3,20 +3,30 @@
   "version": "1.0.0",
   "description": "Bitcoin portfolio tracker",
   "main": "src/server.js",
+  "type": "module",
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "echo \"No tests yet\""
+    "test": "echo \"No tests yet\"",
+    "populate": "node scripts/populateAssets.js",
+    "populate:sp500": "node scripts/populateAssets.js --no-crypto --no-set100",
+    "populate:crypto": "node scripts/populateAssets.js --no-sp500 --no-set100",
+    "populate:set100": "node scripts/populateAssets.js --no-sp500 --no-crypto",
+    "populate:fast": "node scripts/populateAssets.js --no-prices",
+    "update-prices": "node scripts/updatePrices.js 24",
+    "update-prices:hourly": "node scripts/updatePrices.js 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0",
+    "@supabase/supabase-js": "^2.95.3",
     "axios": "^1.6.0",
+    "cheerio": "^1.2.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "node-fetch": "^3.3.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"

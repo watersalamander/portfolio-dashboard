@@ -1,20 +1,25 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const path = require('path');
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const { getBitcoinPrice, getBitcoinHistory } = require('./api/bitcoin');
-const { 
+import { getBitcoinPrice, getBitcoinHistory } from './api/bitcoin.js';
+import { 
   updateDashboard, 
   getDashboardData, 
   getPortfolioHistory 
-} = require('./api/dashboard');
-const { 
+} from './api/dashboard.js';
+import { 
   getHoldings, 
   addHolding, 
   updateHolding, 
   deleteHolding 
-} = require('./api/database');
+} from './api/database.js';
+
+// ES module equivalent of __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;

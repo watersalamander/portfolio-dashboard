@@ -3,59 +3,1536 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bitcoin Portfolio Dashboard</title>
-  <link rel="stylesheet" href="styles.css">
+  <title>Portfolio Tracker</title>
+  
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+  <!-- Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  
+  <style>
+    :root {
+      --bg-primary: #ffffff;
+      --bg-secondary: #f8f9fa;
+      --bg-tertiary: #ffffff;
+      --text-primary: #1a1a1a;
+      --text-secondary: #6c757d;
+      --border-color: #e9ecef;
+      --accent-color: #0066ff;
+      --accent-hover: #0052cc;
+      --success-color: #00b894;
+      --danger-color: #ff6b6b;
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+      --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+    }
+    
+    [data-theme="dark"] {
+      --bg-primary: #1a1a1a;
+      --bg-secondary: #2d2d2d;
+      --bg-tertiary: #242424;
+      --text-primary: #ffffff;
+      --text-secondary: #a0a0a0;
+      --border-color: #404040;
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+      --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+    
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      transition: background 0.3s ease, color 0.3s ease;
+    }
+    
+    /* Login Screen */
+    .login-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    
+    .login-box {
+      background: var(--bg-primary);
+      border-radius: 16px;
+      padding: 48px;
+      max-width: 400px;
+      width: 100%;
+      box-shadow: var(--shadow-lg);
+      border: 1px solid var(--border-color);
+    }
+    
+    .login-box h1 {
+      font-size: 28px;
+      margin-bottom: 8px;
+      text-align: center;
+      color: var(--text-primary);
+    }
+    
+    .login-subtitle {
+      text-align: center;
+      color: var(--text-secondary);
+      font-size: 14px;
+      margin-bottom: 32px;
+    }
+    
+    .login-form input {
+      width: 100%;
+      padding: 14px;
+      margin-bottom: 16px;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      font-size: 14px;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      transition: all 0.2s ease;
+    }
+    
+    .login-form input:focus {
+      outline: none;
+      border-color: var(--accent-color);
+      box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.1);
+    }
+    
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    
+    .btn-primary {
+      background: var(--accent-color);
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background: var(--accent-hover);
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-md);
+    }
+    
+    .btn-secondary {
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      border: 1px solid var(--border-color);
+    }
+    
+    .btn-secondary:hover {
+      background: var(--border-color);
+    }
+    
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
+    .login-divider {
+      text-align: center;
+      margin: 24px 0;
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+    
+    .error-msg {
+      background: #fee;
+      color: #c33;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-size: 14px;
+      border: 1px solid #fcc;
+    }
+    
+    .success-msg {
+      background: #efe;
+      color: #3a3;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-size: 14px;
+      border: 1px solid #cfc;
+    }
+    
+    /* Dashboard */
+    #dashboard {
+      display: none;
+    }
+    
+    .top-bar {
+      background: var(--bg-primary);
+      border-bottom: 1px solid var(--border-color);
+      padding: 16px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: var(--shadow-sm);
+    }
+    
+    .top-bar h1 {
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    
+    .top-bar-right {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+    
+    .theme-toggle {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 18px;
+      transition: all 0.2s ease;
+    }
+    
+    .theme-toggle:hover {
+      background: var(--border-color);
+    }
+    
+    .user-info {
+      font-size: 14px;
+      color: var(--text-secondary);
+      padding: 8px 12px;
+      background: var(--bg-secondary);
+      border-radius: 8px;
+    }
+    
+    .btn-small {
+      padding: 8px 16px;
+      font-size: 14px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      border: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    
+    .btn-accent {
+      background: var(--accent-color);
+      color: white;
+    }
+    
+    .btn-accent:hover {
+      background: var(--accent-hover);
+      transform: translateY(-1px);
+    }
+    
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-secondary);
+      border: 1px solid var(--border-color);
+    }
+    
+    .btn-ghost:hover {
+      background: var(--bg-secondary);
+    }
+    
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 32px;
+    }
+    
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 32px;
+    }
+    
+    .header-controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+    
+    .currency-toggle {
+      display: flex;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 4px;
+    }
+    
+    .currency-btn {
+      padding: 6px 16px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 13px;
+      transition: all 0.2s ease;
+    }
+    
+    .currency-btn.active {
+      background: var(--accent-color);
+      color: white;
+    }
+    
+    .last-update {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+    
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+      margin-bottom: 32px;
+    }
+    
+    .card {
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: var(--shadow-sm);
+      transition: all 0.2s ease;
+    }
+    
+    .card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-md);
+    }
+    
+    .card-label {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-secondary);
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+    
+    .card-value {
+      font-size: 32px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--text-primary);
+    }
+    
+    .card-change {
+      font-size: 14px;
+      font-weight: 600;
+    }
+    
+    .positive { color: var(--success-color); }
+    .negative { color: var(--danger-color); }
+    
+    .charts-section {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 32px;
+    }
+    
+    .chart-container {
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: var(--shadow-sm);
+    }
+    
+    .chart-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 20px;
+      color: var(--text-primary);
+    }
+    
+    .positions-section {
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: var(--shadow-sm);
+    }
+    
+    .positions-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 20px;
+    }
+    
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    
+    thead {
+      background: var(--bg-secondary);
+    }
+    
+    th {
+      padding: 12px;
+      text-align: left;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+    }
+    
+    td {
+      padding: 16px 12px;
+      border-bottom: 1px solid var(--border-color);
+      color: var(--text-primary);
+    }
+    
+    tbody tr:hover {
+      background: var(--bg-secondary);
+    }
+    
+    .ticker-cell {
+      font-weight: 600;
+      color: var(--accent-color);
+    }
+    
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+    
+    .error-message {
+      background: var(--bg-primary);
+      color: var(--danger-color);
+      padding: 16px;
+      border-radius: 12px;
+      margin: 20px 0;
+      border: 1px solid var(--danger-color);
+    }
+    
+    /* Modal */
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      overflow: auto;
+      background-color: rgba(0,0,0,0.5);
+    }
+    
+    .modal-content {
+      background: var(--bg-primary);
+      margin: 5% auto;
+      padding: 0;
+      border-radius: 16px;
+      width: 90%;
+      max-width: 500px;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: var(--shadow-lg);
+      border: 1px solid var(--border-color);
+      animation: slideIn 0.2s ease;
+    }
+    
+    @keyframes slideIn {
+      from { transform: translateY(-20px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    
+    .modal-header {
+      padding: 24px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .modal-header h2 {
+      color: var(--text-primary);
+      font-size: 20px;
+      font-weight: 600;
+    }
+    
+    .close {
+      color: var(--text-secondary);
+      font-size: 28px;
+      font-weight: 300;
+      cursor: pointer;
+      line-height: 1;
+      transition: color 0.2s ease;
+    }
+    
+    .close:hover {
+      color: var(--text-primary);
+    }
+    
+    .modal-body {
+      padding: 24px;
+    }
+    
+    /* Transaction Form Tabs */
+    .tx-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--border-color);
+    }
+    
+    .tx-tab {
+      padding: 12px 24px;
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 14px;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s ease;
+    }
+    
+    .tx-tab.active {
+      color: var(--accent-color);
+      border-bottom-color: var(--accent-color);
+    }
+    
+    .tx-tab:hover {
+      color: var(--text-primary);
+    }
+    
+    .form-group {
+      margin-bottom: 20px;
+    }
+    
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      color: var(--text-primary);
+      font-size: 14px;
+    }
+    
+    .form-group input,
+    .form-group select {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      font-size: 14px;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      transition: all 0.2s ease;
+      font-family: inherit;
+    }
+    
+    .form-group input:focus,
+    .form-group select:focus {
+      outline: none;
+      border-color: var(--accent-color);
+      box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.1);
+    }
+    
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    
+    .input-with-suffix {
+      position: relative;
+    }
+    
+    .input-suffix {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 600;
+      pointer-events: none;
+    }
+    
+    .input-with-suffix input {
+      padding-right: 60px;
+    }
+    
+    .optional-tag {
+      color: var(--text-secondary);
+      font-weight: 400;
+      font-size: 13px;
+    }
+    
+    .expandable-section {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border-color);
+    }
+    
+    .expand-btn {
+      background: none;
+      border: none;
+      color: var(--accent-color);
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 8px 0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    
+    .expand-btn:hover {
+      color: var(--accent-hover);
+    }
+    
+    .coin-selector {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      background: var(--bg-primary);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    
+    .coin-selector:hover {
+      border-color: var(--accent-color);
+    }
+    
+    .coin-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--bg-secondary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+    }
+    
+    .coin-info {
+      flex: 1;
+    }
+    
+    .coin-name {
+      font-weight: 600;
+      color: var(--text-primary);
+      font-size: 14px;
+    }
+    
+    .coin-ticker {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+    
+    @media (max-width: 768px) {
+      .charts-section {
+        grid-template-columns: 1fr;
+      }
+      
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+      
+      .top-bar {
+        padding: 16px;
+      }
+      
+      .container {
+        padding: 20px;
+      }
+    }
+  </style>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>📊 Bitcoin Portfolio Dashboard</h1>
-      <p class="subtitle">Real-time tracking & analytics</p>
-    </header>
-
-    <main>
-      <section class="stats-grid">
-        <div class="stat-card">
-          <h3>Current BTC Price</h3>
-          <p class="stat-value" id="btc-price">Loading...</p>
-        </div>
-
-        <div class="stat-card">
-          <h3>Portfolio Value</h3>
-          <p class="stat-value" id="portfolio-value">Loading...</p>
-        </div>
-
-        <div class="stat-card">
-          <h3>Total BTC Held</h3>
-          <p class="stat-value" id="btc-held">Loading...</p>
-        </div>
-
-        <div class="stat-card">
-          <h3>Profit/Loss</h3>
-          <p class="stat-value" id="profit-loss">Loading...</p>
-        </div>
-      </section>
-
-      <section class="chart-section">
-        <h2>Price History (30 Days)</h2>
-        <canvas id="price-chart"></canvas>
-      </section>
-
-      <section class="holdings-section">
-        <h2>Current Holdings</h2>
-        <div id="holdings-table">
-          <p class="loading">Loading holdings...</p>
-        </div>
-      </section>
-    </main>
-
-    <footer>
-      <p>Last updated: <span id="last-update">Never</span></p>
-      <button id="refresh-btn">🔄 Refresh Data</button>
-    </footer>
+  <!-- Login Screen -->
+  <div id="loginScreen" class="login-container">
+    <div class="login-box">
+      <h1>Portfolio Tracker</h1>
+      <p class="login-subtitle">Track your crypto & stock portfolio</p>
+      <div id="loginMessage"></div>
+      <form id="loginForm" class="login-form">
+        <input type="email" id="loginEmail" placeholder="Email" required>
+        <input type="password" id="loginPassword" placeholder="Password" required>
+        <button type="submit" class="btn btn-primary" id="loginBtn">Sign In</button>
+      </form>
+      <div class="login-divider">or</div>
+      <button class="btn btn-secondary" id="signupBtn">Create Account</button>
+    </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="app.js"></script>
+  <!-- Dashboard -->
+  <div id="dashboard">
+    <div class="top-bar">
+      <h1>Portfolio Tracker</h1>
+      <div class="top-bar-right">
+        <button class="theme-toggle" id="themeToggle" title="Toggle theme">🌙</button>
+        <span class="user-info" id="userEmail"></span>
+        <button class="btn-small btn-accent" id="addTransactionBtn">
+          <span>+</span> Add Transaction
+        </button>
+        <button class="btn-small btn-ghost" id="logoutBtn">Logout</button>
+      </div>
+    </div>
+
+    <div class="container">
+      <div class="header">
+        <div class="header-controls">
+          <div class="currency-toggle">
+            <button class="currency-btn active" data-currency="USD">USD</button>
+            <button class="currency-btn" data-currency="THB">THB</button>
+          </div>
+          <button class="btn-small btn-ghost" id="refreshBtn">🔄 Refresh</button>
+          <button class="btn-small btn-ghost" id="snapshotBtn">📸 Snapshot</button>
+        </div>
+        <div class="last-update" id="lastUpdate">Last updated: --</div>
+      </div>
+      
+      <div class="cards-grid" id="summaryCards">
+        <div class="loading">Loading portfolio data...</div>
+      </div>
+      
+      <div class="charts-section">
+        <div class="chart-container">
+          <div class="chart-title">Asset Allocation</div>
+          <canvas id="allocationChart" height="300"></canvas>
+        </div>
+        
+        <div class="chart-container">
+          <div class="chart-title">Portfolio Growth</div>
+          <canvas id="growthChart" height="300"></canvas>
+        </div>
+      </div>
+      
+      <div class="positions-section">
+        <h2 class="positions-title">Current Positions</h2>
+        <div id="positionsTable">
+          <div class="loading">Loading positions...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Transaction Modal -->
+  <div id="transactionModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Add Transaction</h2>
+        <span class="close" id="closeModal">&times;</span>
+      </div>
+      <div class="modal-body">
+        <!-- Tabs -->
+        <div class="tx-tabs">
+          <button class="tx-tab active" data-tab="buy">Buy</button>
+          <button class="tx-tab" data-tab="sell">Sell</button>
+          <button class="tx-tab" data-tab="transfer">Transfer</button>
+        </div>
+
+        <form id="transactionForm">
+          <!-- Hidden transaction type -->
+          <input type="hidden" id="txType" value="trade">
+          
+          <!-- Coin Selection -->
+          <div class="form-group">
+            <label>Select coin</label>
+            <input type="text" id="txToTicker" placeholder="BTC-USD, ETH-USD, AAPL, etc." required>
+          </div>
+          
+          <!-- Buy/Sell: Total Spent / Total Received -->
+          <div id="totalSection">
+            <div class="form-group">
+              <label id="totalLabel">Total spent</label>
+              <div class="input-with-suffix">
+                <input type="number" id="txFromAmount" step="0.00000001" placeholder="0.00" required>
+                <span class="input-suffix">USD</span>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Quantity and Price -->
+          <div class="form-row">
+            <div class="form-group">
+              <label>Quantity</label>
+              <div class="input-with-suffix">
+                <input type="number" id="txToAmount" step="0.00000001" placeholder="1.00" required>
+                <span class="input-suffix" id="qtySuffix">BTC</span>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Price per coin</label>
+              <div class="input-with-suffix">
+                <input type="number" id="txPricePerCoin" step="0.01" placeholder="1.00">
+                <span class="input-suffix">USD</span>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Date & Time -->
+          <div class="form-group">
+            <label>Date & Time</label>
+            <input type="datetime-local" id="txDate" required>
+          </div>
+          
+          <!-- Expandable: Fees & Notes -->
+          <div class="expandable-section">
+            <button type="button" class="expand-btn" id="expandBtn">
+              <span>+</span> Fees & Notes <span class="optional-tag">(Optional)</span>
+            </button>
+            <div id="optionalFields" style="display: none; margin-top: 16px;">
+              <div class="form-group">
+                <label>Fees</label>
+                <div class="input-with-suffix">
+                  <input type="number" id="txFees" step="0.00000001" placeholder="0.00" value="0">
+                  <span class="input-suffix">USD</span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Platform</label>
+                <input type="text" id="txPlatform" placeholder="Binance, Bitkub, etc.">
+              </div>
+              <div class="form-group">
+                <label>Notes</label>
+                <input type="text" id="txNotes" placeholder="Add notes">
+              </div>
+            </div>
+          </div>
+          
+          <button type="submit" class="btn btn-primary" id="submitBtn" style="margin-top: 24px;">Add Transaction</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ============================================
+    // CONFIG
+    // ============================================
+    const CONFIG = {
+      SUPABASE_URL: 'https://yqtubfuuxpebdhbtnuad.supabase.co',
+      SUPABASE_ANON_KEY: 'sb_publishable_LLqPrzeXFagL7cXssggplw_LId5Im4i'
+    };
+    
+    let sb = null;
+    let currentUser = null;
+    let currentTab = 'buy'; // Track current tab
+    
+    // ============================================
+    // THEME
+    // ============================================
+    function initTheme() {
+      const savedTheme = localStorage.getItem('theme') || 'light';
+      document.documentElement.setAttribute('data-theme', savedTheme);
+      updateThemeIcon(savedTheme);
+    }
+    
+    function toggleTheme() {
+      const currentTheme = document.documentElement.getAttribute('data-theme');
+      const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', newTheme);
+      localStorage.setItem('theme', newTheme);
+      updateThemeIcon(newTheme);
+    }
+    
+    function updateThemeIcon(theme) {
+      const icon = document.getElementById('themeToggle');
+      if (icon) {
+        icon.textContent = theme === 'light' ? '🌙' : '☀️';
+      }
+    }
+    
+    // ============================================
+    // INITIALIZATION
+    // ============================================
+    function initSupabase() {
+      try {
+        if (!window.supabase) {
+          throw new Error('Supabase library not loaded');
+        }
+        sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+        console.log('✅ Supabase initialized');
+        return true;
+      } catch (error) {
+        console.error('❌ Supabase init error:', error);
+        showMessage('Failed to initialize. Check your credentials.', 'error');
+        return false;
+      }
+    }
+    
+    // ============================================
+    // STATE
+    // ============================================
+    const state = {
+      portfolioData: null,
+      currentCurrency: 'USD',
+      charts: { allocation: null, growth: null }
+    };
+    
+    // ============================================
+    // HELPERS
+    // ============================================
+    function showMessage(message, type = 'error') {
+      const container = document.getElementById('loginMessage');
+      const className = type === 'error' ? 'error-msg' : 'success-msg';
+      container.innerHTML = `<div class="${className}">${message}</div>`;
+      if (type === 'success') {
+        setTimeout(() => container.innerHTML = '', 5000);
+      }
+    }
+    
+    function formatCurrency(value, currency) {
+      const symbol = currency === 'USD' ? '$' : '฿';
+      const formatted = Math.abs(value).toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+      return value < 0 ? '-' + symbol + formatted : symbol + formatted;
+    }
+    
+    function showError(message) {
+      document.getElementById('summaryCards').innerHTML = 
+        `<div class="error-message">❌ ${message}</div>`;
+    }
+    
+    // ============================================
+    // AUTH
+    // ============================================
+    async function checkAuth() {
+      try {
+        const { data: { user } } = await sb.auth.getUser();
+        if (user) {
+          currentUser = user;
+          console.log('✅ Authenticated:', user.email);
+          showDashboard();
+        } else {
+          showLogin();
+        }
+      } catch (error) {
+        console.error('❌ Auth error:', error);
+        showLogin();
+      }
+    }
+    
+    function showLogin() {
+      document.getElementById('loginScreen').style.display = 'flex';
+      document.getElementById('dashboard').style.display = 'none';
+    }
+    
+    function showDashboard() {
+      document.getElementById('loginScreen').style.display = 'none';
+      document.getElementById('dashboard').style.display = 'block';
+      document.getElementById('userEmail').textContent = currentUser.email;
+      refreshData();
+    }
+    
+    async function login(email, password) {
+      try {
+        const { data, error } = await sb.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        currentUser = data.user;
+        showDashboard();
+      } catch (error) {
+        console.error('❌ Login error:', error);
+        showMessage(`Login failed: ${error.message}`, 'error');
+      }
+    }
+    
+    async function signup(email, password) {
+      try {
+        const { error } = await sb.auth.signUp({ email, password });
+        if (error) throw error;
+        showMessage('✅ Account created! Check your email to confirm.', 'success');
+      } catch (error) {
+        console.error('❌ Signup error:', error);
+        showMessage(`Signup failed: ${error.message}`, 'error');
+      }
+    }
+    
+    async function logout() {
+      await sb.auth.signOut();
+      currentUser = null;
+      showLogin();
+    }
+    
+    // ============================================
+    // PRICE FETCHING - Using PostgreSQL (No CORS!)
+    // ============================================
+    
+    async function updatePricesInDatabase() {
+      try {
+        if (!currentUser) return;
+        
+        // Call PostgreSQL function to update prices server-side
+        const { error } = await sb.rpc('update_current_prices', {
+          p_user_id: currentUser.id
+        });
+        
+        if (error) {
+          console.error('Error updating prices:', error);
+        } else {
+          console.log('✅ Prices updated successfully');
+        }
+      } catch (error) {
+        console.error('❌ Price update error:', error);
+      }
+    }
+    
+    async function getExchangeRate() {
+      try {
+        // Fetch THB exchange rate using PostgreSQL function
+        const { data, error } = await sb.rpc('fetch_yahoo_price', {
+          p_ticker: 'THB=X'
+        });
+        
+        if (error || !data) {
+          console.log('Using default exchange rate');
+          return 35.50;
+        }
+        
+        return data;
+      } catch (error) {
+        console.error('Exchange rate error:', error);
+        return 35.50;
+      }
+    }
+    
+    // ============================================
+    // DATA FETCHING
+    // ============================================
+    async function fetchPortfolioData() {
+      try {
+        if (!currentUser) throw new Error('Not logged in');
+        
+        // STEP 1: Update prices server-side (no CORS!)
+        console.log('🔄 Updating prices in database...');
+        await updatePricesInDatabase();
+        
+        // STEP 2: Fetch positions (prices already updated!)
+        const { data: positions, error: posError } = await sb
+          .from('current_positions')
+          .select('*')
+          .eq('user_id', currentUser.id);
+        
+        if (posError) throw posError;
+        
+        // STEP 3: Fetch snapshots
+        const { data: snapshots, error: snapError } = await sb
+          .from('portfolio_snapshots')
+          .select('*')
+          .eq('user_id', currentUser.id)
+          .order('snapshot_date', { ascending: true });
+        
+        // STEP 4: Get exchange rate
+        const exchangeRate = await getExchangeRate();
+        
+        // STEP 5: Calculate totals (prices are already in database!)
+        let totalValue = 0, totalCostBasis = 0, totalPnL = 0;
+        (positions || []).forEach(pos => {
+          const currentValue = pos.current_value || (pos.current_price * pos.quantity);
+          totalValue += currentValue;
+          totalCostBasis += pos.total_cost_basis;
+          totalPnL += currentValue - pos.total_cost_basis;
+        });
+        
+        console.log('✅ Portfolio loaded:', {
+          positions: positions?.length || 0,
+          totalValue: totalValue.toFixed(2),
+          exchangeRate
+        });
+        
+        return {
+          positions: positions || [],
+          snapshots: snapshots || [],
+          exchangeRate,
+          summary: {
+            totalValue,
+            totalPnL,
+            totalReturnPct: totalCostBasis > 0 ? (totalPnL / totalCostBasis) * 100 : 0,
+            totalCostBasis
+          },
+          lastUpdate: new Date().toISOString()
+        };
+      } catch (error) {
+        console.error('❌ Fetch error:', error);
+        showError('Error loading data: ' + error.message);
+        return null;
+      }
+    }
+    
+    // ============================================
+    // RENDER
+    // ============================================
+    function renderSummaryCards() {
+      if (!state.portfolioData) return;
+      const { summary, exchangeRate } = state.portfolioData;
+      const { currentCurrency } = state;
+      
+      const totalValue = currentCurrency === 'USD' ? summary.totalValue : summary.totalValue * exchangeRate;
+      const totalPnL = currentCurrency === 'USD' ? summary.totalPnL : summary.totalPnL * exchangeRate;
+      const totalCostBasis = currentCurrency === 'USD' ? summary.totalCostBasis : summary.totalCostBasis * exchangeRate;
+      const isPositive = summary.totalReturnPct >= 0;
+      
+      document.getElementById('summaryCards').innerHTML = `
+        <div class="card">
+          <div class="card-label">Total Value</div>
+          <div class="card-value">${formatCurrency(totalValue, currentCurrency)}</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Total P&L</div>
+          <div class="card-value ${isPositive ? 'positive' : 'negative'}">
+            ${formatCurrency(totalPnL, currentCurrency)}
+          </div>
+          <div class="card-change ${isPositive ? 'positive' : 'negative'}">
+            ${isPositive ? '+' : ''}${summary.totalReturnPct.toFixed(2)}%
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-label">Cost Basis</div>
+          <div class="card-value">${formatCurrency(totalCostBasis, currentCurrency)}</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Positions</div>
+          <div class="card-value">${state.portfolioData.positions.length}</div>
+        </div>
+      `;
+    }
+    
+    function renderAllocationChart() {
+      const canvas = document.getElementById('allocationChart');
+      if (!canvas) return;
+      
+      if (!state.portfolioData || state.portfolioData.positions.length === 0) {
+        const container = canvas.closest('.chart-container');
+        if (container) {
+          container.innerHTML = '<div class="chart-title">Asset Allocation</div><div class="loading">No positions yet</div>';
+        }
+        return;
+      }
+      
+      const ctx = canvas.getContext('2d');
+      if (state.charts.allocation) state.charts.allocation.destroy();
+      
+      const allocationMap = {};
+      state.portfolioData.positions.forEach(pos => {
+        const value = pos.current_price * pos.quantity;
+        allocationMap[pos.asset_type] = (allocationMap[pos.asset_type] || 0) + value;
+      });
+      
+      const labels = Object.keys(allocationMap);
+      const values = Object.values(allocationMap).map(v => 
+        state.currentCurrency === 'USD' ? v : v * state.portfolioData.exchangeRate
+      );
+      
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      
+      state.charts.allocation = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels,
+          datasets: [{
+            data: values,
+            backgroundColor: ['#0066ff', '#00b894', '#ff6b6b', '#ffa502', '#9b59b6', '#3498db'],
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: {
+                padding: 15,
+                font: { size: 12, weight: '600' },
+                color: isDark ? '#a0a0a0' : '#6c757d'
+              }
+            },
+            tooltip: {
+              backgroundColor: 'rgba(0, 0, 0, 0.8)',
+              callbacks: {
+                label: ctx => {
+                  const value = ctx.parsed;
+                  const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                  const pct = ((value / total) * 100).toFixed(1);
+                  return `${ctx.label}: ${formatCurrency(value, state.currentCurrency)} (${pct}%)`;
+                }
+              }
+            }
+          }
+        }
+      });
+    }
+    
+    function renderGrowthChart() {
+      const canvas = document.getElementById('growthChart');
+      if (!canvas) return;
+      
+      if (!state.portfolioData || state.portfolioData.snapshots.length === 0) {
+        const container = canvas.closest('.chart-container');
+        if (container) {
+          container.innerHTML = '<div class="chart-title">Portfolio Growth</div><div class="loading">No history yet</div>';
+        }
+        return;
+      }
+      
+      const ctx = canvas.getContext('2d');
+      if (state.charts.growth) state.charts.growth.destroy();
+      
+      const snapshots = state.portfolioData.snapshots;
+      const labels = snapshots.map(s => new Date(s.snapshot_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+      const values = snapshots.map(s => {
+        const v = s.total_value || 0;
+        return state.currentCurrency === 'USD' ? v : v * state.portfolioData.exchangeRate;
+      });
+      
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      
+      state.charts.growth = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Portfolio Value',
+            data: values,
+            borderColor: '#0066ff',
+            backgroundColor: 'rgba(0, 102, 255, 0.1)',
+            borderWidth: 3,
+            tension: 0.4,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: 'rgba(0, 0, 0, 0.8)',
+              callbacks: {
+                label: ctx => 'Portfolio: ' + formatCurrency(ctx.parsed.y, state.currentCurrency)
+              }
+            }
+          },
+          scales: {
+            y: {
+              grid: { color: isDark ? '#404040' : '#e9ecef' },
+              ticks: {
+                color: isDark ? '#a0a0a0' : '#6c757d',
+                callback: v => formatCurrency(v, state.currentCurrency)
+              }
+            },
+            x: {
+              grid: { display: false },
+              ticks: { color: isDark ? '#a0a0a0' : '#6c757d' }
+            }
+          }
+        }
+      });
+    }
+    
+    function renderPositionsTable() {
+      if (!state.portfolioData || state.portfolioData.positions.length === 0) {
+        document.getElementById('positionsTable').innerHTML = '<div class="loading">No positions yet</div>';
+        return;
+      }
+      
+      const positions = state.portfolioData.positions;
+      const exchangeRate = state.portfolioData.exchangeRate;
+      
+      let html = '<table><thead><tr><th>Ticker</th><th>Type</th><th>Quantity</th><th>Avg Cost</th><th>Current Price</th><th>Value</th><th>P&L</th><th>Return</th></tr></thead><tbody>';
+      
+      positions.forEach(pos => {
+        const currentValue = pos.current_price * pos.quantity;
+        const pnl = currentValue - pos.total_cost_basis;
+        const returnPct = pos.total_cost_basis > 0 ? (pnl / pos.total_cost_basis) * 100 : 0;
+        const isPositive = pnl >= 0;
+        
+        const rate = state.currentCurrency === 'USD' ? 1 : exchangeRate;
+        
+        html += `
+          <tr>
+            <td class="ticker-cell">${pos.ticker}</td>
+            <td>${pos.asset_type}</td>
+            <td>${pos.quantity.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 8})}</td>
+            <td>${formatCurrency(pos.average_cost * rate, state.currentCurrency)}</td>
+            <td>${formatCurrency(pos.current_price * rate, state.currentCurrency)}</td>
+            <td>${formatCurrency(currentValue * rate, state.currentCurrency)}</td>
+            <td class="${isPositive ? 'positive' : 'negative'}">${isPositive ? '+' : ''}${formatCurrency(pnl * rate, state.currentCurrency)}</td>
+            <td class="${isPositive ? 'positive' : 'negative'}">${isPositive ? '+' : ''}${returnPct.toFixed(2)}%</td>
+          </tr>
+        `;
+      });
+      
+      html += '</tbody></table>';
+      document.getElementById('positionsTable').innerHTML = html;
+    }
+    
+    function renderDashboard() {
+      if (!state.portfolioData) return;
+      renderSummaryCards();
+      renderAllocationChart();
+      renderGrowthChart();
+      renderPositionsTable();
+      const time = new Date(state.portfolioData.lastUpdate).toLocaleString('en-US', {
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+      });
+      document.getElementById('lastUpdate').textContent = `Last updated: ${time}`;
+    }
+    
+    async function refreshData() {
+      document.getElementById('summaryCards').innerHTML = '<div class="loading">Refreshing...</div>';
+      document.getElementById('positionsTable').innerHTML = '<div class="loading">Refreshing...</div>';
+      state.portfolioData = await fetchPortfolioData();
+      if (state.portfolioData) renderDashboard();
+    }
+    
+    // ============================================
+    // SNAPSHOT CREATION
+    // ============================================
+    async function createSnapshot() {
+      try {
+        if (!currentUser) {
+          alert('Not logged in');
+          return;
+        }
+        
+        const btn = document.getElementById('snapshotBtn');
+        btn.disabled = true;
+        btn.textContent = '📸 Creating...';
+        
+        // Call the Supabase function
+        const { data, error } = await sb.rpc('create_portfolio_snapshot', {
+          p_user_id: currentUser.id
+        });
+        
+        if (error) throw error;
+        
+        alert('✅ Snapshot created successfully!');
+        await refreshData();
+      } catch (error) {
+        console.error('❌ Snapshot error:', error);
+        alert('Error creating snapshot: ' + error.message);
+      } finally {
+        const btn = document.getElementById('snapshotBtn');
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '📸 Snapshot';
+        }
+      }
+    }
+    
+    // ============================================
+    // TRANSACTION FORM
+    // ============================================
+    function updateFormForTab(tab) {
+      currentTab = tab;
+      const totalLabel = document.getElementById('totalLabel');
+      const totalSection = document.getElementById('totalSection');
+      
+      if (tab === 'buy') {
+        totalLabel.textContent = 'Total spent';
+        totalSection.style.display = 'block';
+        document.getElementById('txType').value = 'trade';
+      } else if (tab === 'sell') {
+        totalLabel.textContent = 'Total received';
+        totalSection.style.display = 'block';
+        document.getElementById('txType').value = 'trade';
+      } else if (tab === 'transfer') {
+        totalSection.style.display = 'none';
+        document.getElementById('txType').value = 'deposit';
+      }
+    }
+    
+    async function submitTransaction() {
+      try {
+        const ticker = document.getElementById('txToTicker').value.toUpperCase();
+        const toAmount = parseFloat(document.getElementById('txToAmount').value);
+        const fees = parseFloat(document.getElementById('txFees').value) || 0;
+        
+        const transaction = {
+          user_id: currentUser.id,
+          transaction_date: document.getElementById('txDate').value,
+          to_ticker: ticker,
+          to_amount: toAmount,
+          to_asset_type: ticker.includes('BTC') || ticker.includes('ETH') ? 'crypto' : (ticker.startsWith('CASH') ? 'cash' : 'stock'),
+          fees: fees,
+          platform: document.getElementById('txPlatform').value || null,
+          notes: document.getElementById('txNotes').value || null,
+          is_short_position: false
+        };
+        
+        if (currentTab === 'transfer') {
+          transaction.transaction_type = 'deposit';
+        } else {
+          transaction.transaction_type = 'trade';
+          const fromAmount = parseFloat(document.getElementById('txFromAmount').value);
+          transaction.from_ticker = 'USDT-USD';
+          transaction.from_amount = fromAmount;
+          transaction.from_asset_type = 'stablecoin';
+          transaction.exchange_rate = fromAmount / toAmount;
+        }
+        
+        const { error } = await sb.from('transactions').insert([transaction]);
+        if (error) throw error;
+        
+        alert('✅ Transaction added!');
+        document.getElementById('transactionModal').style.display = 'none';
+        document.getElementById('transactionForm').reset();
+        await refreshData();
+      } catch (error) {
+        console.error('❌ Transaction error:', error);
+        alert('Error: ' + error.message);
+      }
+    }
+    
+    // ============================================
+    // EVENT LISTENERS
+    // ============================================
+    document.addEventListener('DOMContentLoaded', function() {
+      initTheme();
+      if (!initSupabase()) return;
+      checkAuth();
+      
+      // Auth
+      document.getElementById('loginForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await login(document.getElementById('loginEmail').value, document.getElementById('loginPassword').value);
+      });
+      
+      document.getElementById('signupBtn').addEventListener('click', async () => {
+        const email = document.getElementById('loginEmail').value;
+        const password = document.getElementById('loginPassword').value;
+        if (!email || !password) {
+          showMessage('Enter email and password', 'error');
+          return;
+        }
+        if (password.length < 6) {
+          showMessage('Password must be 6+ characters', 'error');
+          return;
+        }
+        await signup(email, password);
+      });
+      
+      document.getElementById('logoutBtn')?.addEventListener('click', logout);
+      
+      // Theme
+      document.getElementById('themeToggle')?.addEventListener('click', toggleTheme);
+      
+      // Currency
+      document.querySelectorAll('.currency-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+          state.currentCurrency = this.dataset.currency;
+          document.querySelectorAll('.currency-btn').forEach(b => b.classList.remove('active'));
+          this.classList.add('active');
+          renderDashboard();
+        });
+      });
+      
+      // Refresh
+      document.getElementById('refreshBtn')?.addEventListener('click', refreshData);
+      
+      // Snapshot
+      document.getElementById('snapshotBtn')?.addEventListener('click', createSnapshot);
+      
+      // Modal
+      document.getElementById('addTransactionBtn')?.addEventListener('click', () => {
+        document.getElementById('transactionModal').style.display = 'block';
+        document.getElementById('txDate').value = new Date().toISOString().slice(0, 16);
+      });
+      
+      document.getElementById('closeModal')?.addEventListener('click', () => {
+        document.getElementById('transactionModal').style.display = 'none';
+      });
+      
+      window.addEventListener('click', (e) => {
+        if (e.target.id === 'transactionModal') {
+          document.getElementById('transactionModal').style.display = 'none';
+        }
+      });
+      
+      // Tabs
+      document.querySelectorAll('.tx-tab').forEach(tab => {
+        tab.addEventListener('click', function() {
+          document.querySelectorAll('.tx-tab').forEach(t => t.classList.remove('active'));
+          this.classList.add('active');
+          updateFormForTab(this.dataset.tab);
+        });
+      });
+      
+      // Expand button
+      document.getElementById('expandBtn')?.addEventListener('click', () => {
+        const fields = document.getElementById('optionalFields');
+        const btn = document.getElementById('expandBtn');
+        if (fields.style.display === 'none') {
+          fields.style.display = 'block';
+          btn.innerHTML = '<span>−</span> Fees & Notes <span class="optional-tag">(Optional)</span>';
+        } else {
+          fields.style.display = 'none';
+          btn.innerHTML = '<span>+</span> Fees & Notes <span class="optional-tag">(Optional)</span>';
+        }
+      });
+      
+      // Auto-calculate price
+      document.getElementById('txFromAmount')?.addEventListener('input', () => {
+        const total = parseFloat(document.getElementById('txFromAmount').value) || 0;
+        const qty = parseFloat(document.getElementById('txToAmount').value) || 1;
+        if (total && qty) {
+          document.getElementById('txPricePerCoin').value = (total / qty).toFixed(2);
+        }
+      });
+      
+      document.getElementById('txToAmount')?.addEventListener('input', () => {
+        const total = parseFloat(document.getElementById('txFromAmount').value) || 0;
+        const qty = parseFloat(document.getElementById('txToAmount').value) || 1;
+        if (total && qty) {
+          document.getElementById('txPricePerCoin').value = (total / qty).toFixed(2);
+        }
+      });
+      
+      // Form submit
+      document.getElementById('transactionForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('submitBtn');
+        btn.disabled = true;
+        btn.textContent = 'Adding...';
+        try {
+          await submitTransaction();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'Add Transaction';
+        }
+      });
+    });
+  </script>
 </body>
 </html>
