@@ -136,6 +136,7 @@ async function fetchTop100Crypto() {
       description: `${coin.name} (${coin.symbol.toUpperCase()}) - Rank #${coin.market_cap_rank} by market cap`,
       logoUrl: coin.image,
       dataSource: 'coingecko',
+      coingeckoId: coin.id,
       marketCapRank: coin.market_cap_rank,
       marketCap: coin.market_cap
     }));

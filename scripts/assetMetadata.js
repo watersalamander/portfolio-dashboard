@@ -65,6 +65,7 @@ export async function getAssetMetadata(ticker) {
       description: data.description,
       logoUrl: data.logo_url,
       dataSource: data.data_source,
+      coingeckoId: data.coingecko_id,
       createdAt: data.created_at,
       updatedAt: data.updated_at
     };
@@ -110,6 +111,7 @@ export async function getBatchAssetMetadata(tickers) {
         description: asset.description,
         logoUrl: asset.logo_url,
         dataSource: asset.data_source,
+        coingeckId: asset.coingecko_id,
         createdAt: asset.created_at,
         updatedAt: asset.updated_at
       };
@@ -149,7 +151,8 @@ export async function upsertAssetMetadata(assetData) {
         last_price_update: assetData.lastPriceUpdate || new Date().toISOString(),
         description: assetData.description || null,
         logo_url: assetData.logoUrl || null,
-        data_source: assetData.dataSource || 'manual'
+        data_source: assetData.dataSource || 'manual',
+        coingecko_id: assetData.coingeckoId || null
       }, {
         onConflict: 'ticker'
       })

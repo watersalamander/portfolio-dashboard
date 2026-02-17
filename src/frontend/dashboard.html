@@ -361,6 +361,14 @@
       border-radius: 12px;
       padding: 24px;
       box-shadow: var(--shadow-sm);
+      height: 500px;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .chart-container canvas {
+      flex: 1;
+      max-height: 100%;
     }
     
     .chart-title {
@@ -661,6 +669,10 @@
         grid-template-columns: 1fr;
       }
       
+      .chart-container {
+        height: 350px;
+      }
+      
       .form-row {
         grid-template-columns: 1fr;
       }
@@ -726,12 +738,12 @@
       <div class="charts-section">
         <div class="chart-container">
           <div class="chart-title">Asset Allocation</div>
-          <canvas id="allocationChart" height="300"></canvas>
+          <canvas id="allocationChart"></canvas>
         </div>
         
         <div class="chart-container">
           <div class="chart-title">Portfolio Growth</div>
-          <canvas id="growthChart" height="300"></canvas>
+          <canvas id="growthChart"></canvas>
         </div>
       </div>
       
@@ -760,22 +772,53 @@
         </div>
 
         <form id="transactionForm">
-          <!-- Hidden transaction type -->
+          <!-- Hidden fields -->
           <input type="hidden" id="txType" value="trade">
-          
-          <!-- Coin Selection -->
-          <div class="form-group">
-            <label>Select coin</label>
-            <input type="text" id="txToTicker" placeholder="BTC-USD, ETH-USD, AAPL, etc." required>
+
+          <!-- Transfer In/Out selector — only shown on Transfer tab -->
+          <div id="transferTypeSection" style="display: none; margin-bottom: 20px;">
+            <label style="display:block; margin-bottom:8px; font-weight:500; color:var(--text-primary); font-size:14px;">Transfer direction</label>
+            <div style="display:flex; gap:0; border:1px solid var(--border-color); border-radius:8px; overflow:hidden;">
+              <button type="button" class="transfer-dir-btn active" data-dir="in"
+                style="flex:1; padding:10px; border:none; background:var(--accent-color); color:white; font-weight:600; font-size:14px; cursor:pointer; transition:all 0.2s;">
+                ↙ Transfer In
+              </button>
+              <button type="button" class="transfer-dir-btn" data-dir="out"
+                style="flex:1; padding:10px; border:none; background:var(--bg-secondary); color:var(--text-secondary); font-weight:600; font-size:14px; cursor:pointer; transition:all 0.2s;">
+                ↗ Transfer Out
+              </button>
+            </div>
           </div>
           
-          <!-- Buy/Sell: Total Spent / Total Received -->
+          <!-- Asset ticker -->
+          <div class="form-group">
+            <label id="assetLabel">Asset</label>
+            <input type="text" id="txToTicker" placeholder="BTC-USD, ETH-USD, AAPL, ADVANC.BK, etc." required>
+          </div>
+          
+          <!-- Currency selector (USD / THB) -->
+          <div class="form-group">
+            <label>Transaction currency</label>
+            <div style="display:flex; gap:0; border:1px solid var(--border-color); border-radius:8px; overflow:hidden;">
+              <button type="button" class="tx-currency-btn active" data-currency="USD"
+                style="flex:1; padding:10px; border:none; background:var(--accent-color); color:white; font-weight:600; font-size:14px; cursor:pointer; transition:all 0.2s;">
+                💵 USD
+              </button>
+              <button type="button" class="tx-currency-btn" data-currency="THB"
+                style="flex:1; padding:10px; border:none; background:var(--bg-secondary); color:var(--text-secondary); font-weight:600; font-size:14px; cursor:pointer; transition:all 0.2s;">
+                🇹🇭 THB
+              </button>
+            </div>
+          </div>
+          <input type="hidden" id="txCurrency" value="USD">
+          
+          <!-- Total spent / received — hidden on Transfer Out -->
           <div id="totalSection">
             <div class="form-group">
               <label id="totalLabel">Total spent</label>
               <div class="input-with-suffix">
                 <input type="number" id="txFromAmount" step="0.00000001" placeholder="0.00" required>
-                <span class="input-suffix">USD</span>
+                <span class="input-suffix" id="totalCurrencySuffix">USD</span>
               </div>
             </div>
           </div>
@@ -786,14 +829,14 @@
               <label>Quantity</label>
               <div class="input-with-suffix">
                 <input type="number" id="txToAmount" step="0.00000001" placeholder="1.00" required>
-                <span class="input-suffix" id="qtySuffix">BTC</span>
+                <span class="input-suffix" id="qtySuffix">units</span>
               </div>
             </div>
             <div class="form-group">
-              <label>Price per coin</label>
+              <label>Price per unit</label>
               <div class="input-with-suffix">
-                <input type="number" id="txPricePerCoin" step="0.01" placeholder="1.00">
-                <span class="input-suffix">USD</span>
+                <input type="number" id="txPricePerCoin" step="0.01" placeholder="0.00">
+                <span class="input-suffix" id="priceCurrencySuffix">USD</span>
               </div>
             </div>
           </div>
@@ -814,7 +857,7 @@
                 <label>Fees</label>
                 <div class="input-with-suffix">
                   <input type="number" id="txFees" step="0.00000001" placeholder="0.00" value="0">
-                  <span class="input-suffix">USD</span>
+                  <span class="input-suffix" id="feeCurrencySuffix">USD</span>
                 </div>
               </div>
               <div class="form-group">
@@ -1094,31 +1137,59 @@
     // ============================================
     function renderSummaryCards() {
       if (!state.portfolioData) return;
-      const { summary, exchangeRate } = state.portfolioData;
-      const { currentCurrency } = state;
-      
-      const totalValue = currentCurrency === 'USD' ? summary.totalValue : summary.totalValue * exchangeRate;
-      const totalPnL = currentCurrency === 'USD' ? summary.totalPnL : summary.totalPnL * exchangeRate;
-      const totalCostBasis = currentCurrency === 'USD' ? summary.totalCostBasis : summary.totalCostBasis * exchangeRate;
-      const isPositive = summary.totalReturnPct >= 0;
+      const { exchangeRate } = state.portfolioData;
+      const displayCur = state.currentCurrency;
+
+      function getNativePriceCurrency(ticker) {
+        if (ticker.endsWith('.BK'))        return 'THB';
+        if (ticker.startsWith('CASH-THB')) return 'THB';
+        return 'USD';
+      }
+
+      // Accumulate everything in USD, then convert at end
+      let totalValueUSD     = 0;
+      let totalCostBasisUSD = 0;
+
+      state.portfolioData.positions.forEach(pos => {
+        const posCurrency   = pos.currency || 'USD';
+        const priceCurrency = getNativePriceCurrency(pos.ticker);
+
+        let avgCostUSD   = pos.average_cost;
+        if (posCurrency === 'THB') avgCostUSD = pos.average_cost / exchangeRate;
+
+        let currentPriceUSD = pos.current_price || 0;
+        if (priceCurrency === 'THB') currentPriceUSD = pos.current_price / exchangeRate;
+
+        totalValueUSD     += currentPriceUSD * pos.quantity;
+        totalCostBasisUSD += avgCostUSD * pos.quantity;
+      });
+
+      const totalPnLUSD   = totalValueUSD - totalCostBasisUSD;
+      const totalReturnPct = totalCostBasisUSD > 0 ? (totalPnLUSD / totalCostBasisUSD) * 100 : 0;
+      const convert = v => displayCur === 'USD' ? v : v * exchangeRate;
+
+      const totalValue     = convert(totalValueUSD);
+      const totalPnL       = convert(totalPnLUSD);
+      const totalCostBasis = convert(totalCostBasisUSD);
+      const isPositive     = totalPnL >= 0;
       
       document.getElementById('summaryCards').innerHTML = `
         <div class="card">
           <div class="card-label">Total Value</div>
-          <div class="card-value">${formatCurrency(totalValue, currentCurrency)}</div>
+          <div class="card-value">${formatCurrency(totalValue, displayCur)}</div>
         </div>
         <div class="card">
           <div class="card-label">Total P&L</div>
           <div class="card-value ${isPositive ? 'positive' : 'negative'}">
-            ${formatCurrency(totalPnL, currentCurrency)}
+            ${isPositive ? '+' : ''}${formatCurrency(totalPnL, displayCur)}
           </div>
           <div class="card-change ${isPositive ? 'positive' : 'negative'}">
-            ${isPositive ? '+' : ''}${summary.totalReturnPct.toFixed(2)}%
+            ${isPositive ? '+' : ''}${totalReturnPct.toFixed(2)}%
           </div>
         </div>
         <div class="card">
           <div class="card-label">Cost Basis</div>
-          <div class="card-value">${formatCurrency(totalCostBasis, currentCurrency)}</div>
+          <div class="card-value">${formatCurrency(totalCostBasis, displayCur)}</div>
         </div>
         <div class="card">
           <div class="card-label">Positions</div>
@@ -1200,7 +1271,7 @@
       if (!state.portfolioData || state.portfolioData.snapshots.length === 0) {
         const container = canvas.closest('.chart-container');
         if (container) {
-          container.innerHTML = '<div class="chart-title">Portfolio Growth</div><div class="loading">No history yet</div>';
+          container.innerHTML = '<div class="chart-title">Portfolio Growth</div><div class="loading">No history yet — click 📸 Snapshot to start tracking</div>';
         }
         return;
       }
@@ -1209,13 +1280,35 @@
       if (state.charts.growth) state.charts.growth.destroy();
       
       const snapshots = state.portfolioData.snapshots;
-      const labels = snapshots.map(s => new Date(s.snapshot_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
-      const values = snapshots.map(s => {
-        const v = s.total_value || 0;
-        return state.currentCurrency === 'USD' ? v : v * state.portfolioData.exchangeRate;
+
+      // Support both column naming conventions: total_value_usd OR total_value
+      // Filter out snapshots with zero/null values (price API not yet run)
+      const validSnapshots = snapshots.filter(s => {
+        const v = s.total_value_usd ?? s.total_value ?? 0;
+        return v > 0;
+      });
+
+      if (validSnapshots.length === 0) {
+        const container = canvas.closest('.chart-container');
+        if (container) {
+          container.innerHTML = '<div class="chart-title">Portfolio Growth</div><div class="loading">Snapshots found but values are zero — try refreshing prices first, then take a snapshot</div>';
+        }
+        return;
+      }
+
+      const labels = validSnapshots.map(s =>
+        new Date(s.snapshot_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      );
+      const values = validSnapshots.map(s => {
+        // total_value_usd is already in USD; convert to THB if needed
+        const usdValue = s.total_value_usd ?? s.total_value ?? 0;
+        return state.currentCurrency === 'USD' ? usdValue : usdValue * state.portfolioData.exchangeRate;
       });
       
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const isPositive = values.length < 2 || values[values.length - 1] >= values[0];
+      const lineColor = isPositive ? '#00b894' : '#ff6b6b';
+      const fillColor = isPositive ? 'rgba(0, 184, 148, 0.1)' : 'rgba(255, 107, 107, 0.1)';
       
       state.charts.growth = new Chart(ctx, {
         type: 'line',
@@ -1224,11 +1317,13 @@
           datasets: [{
             label: 'Portfolio Value',
             data: values,
-            borderColor: '#0066ff',
-            backgroundColor: 'rgba(0, 102, 255, 0.1)',
+            borderColor: lineColor,
+            backgroundColor: fillColor,
             borderWidth: 3,
             tension: 0.4,
-            fill: true
+            fill: true,
+            pointRadius: 4,
+            pointHoverRadius: 6
           }]
         },
         options: {
@@ -1266,28 +1361,53 @@
         return;
       }
       
-      const positions = state.portfolioData.positions;
+      const positions    = state.portfolioData.positions;
       const exchangeRate = state.portfolioData.exchangeRate;
+      const displayCur   = state.currentCurrency;
+
+      function getNativePriceCurrency(ticker) {
+        if (ticker.endsWith('.BK'))       return 'THB';
+        if (ticker.startsWith('CASH-THB')) return 'THB';
+        return 'USD';
+      }
       
       let html = '<table><thead><tr><th>Ticker</th><th>Type</th><th>Quantity</th><th>Avg Cost</th><th>Current Price</th><th>Value</th><th>P&L</th><th>Return</th></tr></thead><tbody>';
       
       positions.forEach(pos => {
-        const currentValue = pos.current_price * pos.quantity;
-        const pnl = currentValue - pos.total_cost_basis;
-        const returnPct = pos.total_cost_basis > 0 ? (pnl / pos.total_cost_basis) * 100 : 0;
-        const isPositive = pnl >= 0;
-        
-        const rate = state.currentCurrency === 'USD' ? 1 : exchangeRate;
+        // posCurrency: what currency the user paid in (stored on position)
+        const posCurrency    = pos.currency || 'USD';
+        // priceCurrency: what currency Yahoo Finance returns for this ticker
+        const priceCurrency  = getNativePriceCurrency(pos.ticker);
+
+        // -- Average cost → convert from posCurrency to displayCur --
+        let displayAvgCost = pos.average_cost;
+        if (posCurrency === 'THB' && displayCur === 'USD')
+          displayAvgCost = pos.average_cost / exchangeRate;
+        else if (posCurrency === 'USD' && displayCur === 'THB')
+          displayAvgCost = pos.average_cost * exchangeRate;
+
+        // -- Current price → convert from priceCurrency to displayCur --
+        let displayPrice = pos.current_price || 0;
+        if (priceCurrency === 'USD' && displayCur === 'THB')
+          displayPrice = pos.current_price * exchangeRate;
+        else if (priceCurrency === 'THB' && displayCur === 'USD')
+          displayPrice = pos.current_price / exchangeRate;
+
+        const currentValue = displayPrice * pos.quantity;
+        const costBasis    = displayAvgCost * pos.quantity;
+        const pnl          = currentValue - costBasis;
+        const returnPct    = costBasis > 0 ? (pnl / costBasis) * 100 : 0;
+        const isPositive   = pnl >= 0;
         
         html += `
           <tr>
             <td class="ticker-cell">${pos.ticker}</td>
             <td>${pos.asset_type}</td>
             <td>${pos.quantity.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 8})}</td>
-            <td>${formatCurrency(pos.average_cost * rate, state.currentCurrency)}</td>
-            <td>${formatCurrency(pos.current_price * rate, state.currentCurrency)}</td>
-            <td>${formatCurrency(currentValue * rate, state.currentCurrency)}</td>
-            <td class="${isPositive ? 'positive' : 'negative'}">${isPositive ? '+' : ''}${formatCurrency(pnl * rate, state.currentCurrency)}</td>
+            <td>${formatCurrency(displayAvgCost, displayCur)}</td>
+            <td>${displayPrice > 0 ? formatCurrency(displayPrice, displayCur) : '<span style="color:var(--text-secondary)">Updating…</span>'}</td>
+            <td>${displayPrice > 0 ? formatCurrency(currentValue, displayCur) : '—'}</td>
+            <td class="${isPositive ? 'positive' : 'negative'}">${isPositive ? '+' : ''}${formatCurrency(pnl, displayCur)}</td>
             <td class="${isPositive ? 'positive' : 'negative'}">${isPositive ? '+' : ''}${returnPct.toFixed(2)}%</td>
           </tr>
         `;
@@ -1354,61 +1474,177 @@
     // ============================================
     // TRANSACTION FORM
     // ============================================
+    let currentTransferDir = 'in'; // 'in' or 'out'
+    let selectedTxCurrency = 'USD';
+
+    function getAssetType(ticker) {
+      if (ticker.startsWith('CASH')) return 'cash';
+      if (['BTC', 'ETH', 'BNB', 'SOL', 'ADA', 'XRP', 'DOGE', 'AVAX', 'MATIC', 'DOT'].some(c => ticker.startsWith(c))) return 'crypto';
+      if (ticker.endsWith('.BK')) return 'stock';
+      if (ticker.includes('-USD') && ticker.length <= 10) return 'crypto'; // e.g. AAVE-USD
+      return 'stock';
+    }
+
+    function getCashTicker(currency) {
+      return currency === 'THB' ? 'CASH-THB' : 'CASH-USD';
+    }
+
     function updateFormForTab(tab) {
       currentTab = tab;
-      const totalLabel = document.getElementById('totalLabel');
+      const totalLabel  = document.getElementById('totalLabel');
       const totalSection = document.getElementById('totalSection');
-      
+      const assetLabel  = document.getElementById('assetLabel');
+      const transferTypeSection = document.getElementById('transferTypeSection');
+      const fromAmountInput = document.getElementById('txFromAmount');
+
       if (tab === 'buy') {
-        totalLabel.textContent = 'Total spent';
+        assetLabel.textContent   = 'Asset to buy';
+        totalLabel.textContent   = 'Total spent';
         totalSection.style.display = 'block';
+        transferTypeSection.style.display = 'none';
+        fromAmountInput.required = true;
         document.getElementById('txType').value = 'trade';
       } else if (tab === 'sell') {
-        totalLabel.textContent = 'Total received';
+        assetLabel.textContent   = 'Asset to sell';
+        totalLabel.textContent   = 'Total received';
         totalSection.style.display = 'block';
+        transferTypeSection.style.display = 'none';
+        fromAmountInput.required = true;
         document.getElementById('txType').value = 'trade';
       } else if (tab === 'transfer') {
+        assetLabel.textContent   = 'Asset';
         totalSection.style.display = 'none';
-        document.getElementById('txType').value = 'deposit';
+        transferTypeSection.style.display = 'block';
+        fromAmountInput.required = false;
+        document.getElementById('txType').value = currentTransferDir === 'in' ? 'deposit' : 'withdrawal';
       }
     }
-    
+
+    function selectTransferDir(dir) {
+      currentTransferDir = dir;
+      document.querySelectorAll('.transfer-dir-btn').forEach(btn => {
+        const isActive = btn.dataset.dir === dir;
+        btn.style.background = isActive ? 'var(--accent-color)' : 'var(--bg-secondary)';
+        btn.style.color      = isActive ? 'white' : 'var(--text-secondary)';
+      });
+      document.getElementById('txType').value = dir === 'in' ? 'deposit' : 'withdrawal';
+    }
+
+    function selectTxCurrency(currency) {
+      selectedTxCurrency = currency;
+      document.getElementById('txCurrency').value = currency;
+      document.querySelectorAll('.tx-currency-btn').forEach(btn => {
+        const isActive = btn.dataset.currency === currency;
+        btn.style.background = isActive ? 'var(--accent-color)' : 'var(--bg-secondary)';
+        btn.style.color      = isActive ? 'white' : 'var(--text-secondary)';
+      });
+      // Update all currency suffix labels
+      ['totalCurrencySuffix', 'priceCurrencySuffix', 'feeCurrencySuffix'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = currency;
+      });
+    }
+
+    function recalcPrice() {
+      const total = parseFloat(document.getElementById('txFromAmount').value) || 0;
+      const qty   = parseFloat(document.getElementById('txToAmount').value)   || 0;
+      if (total > 0 && qty > 0) {
+        document.getElementById('txPricePerCoin').value = (total / qty).toFixed(6);
+      }
+    }
+
     async function submitTransaction() {
       try {
-        const ticker = document.getElementById('txToTicker').value.toUpperCase();
-        const toAmount = parseFloat(document.getElementById('txToAmount').value);
-        const fees = parseFloat(document.getElementById('txFees').value) || 0;
-        
-        const transaction = {
+        const ticker    = document.getElementById('txToTicker').value.trim().toUpperCase();
+        const qty       = parseFloat(document.getElementById('txToAmount').value);
+        const total     = parseFloat(document.getElementById('txFromAmount').value) || 0;
+        const fees      = parseFloat(document.getElementById('txFees').value) || 0;
+        const txDate    = document.getElementById('txDate').value;
+        const platform  = document.getElementById('txPlatform').value || null;
+        const notes     = document.getElementById('txNotes').value || null;
+        const currency  = selectedTxCurrency;
+        const cashTicker = getCashTicker(currency);
+
+        if (!ticker || !qty || !txDate) {
+          alert('Please fill in Asset, Quantity, and Date fields.');
+          return;
+        }
+
+        const assetType = getAssetType(ticker);
+        let transaction = {
           user_id: currentUser.id,
-          transaction_date: document.getElementById('txDate').value,
-          to_ticker: ticker,
-          to_amount: toAmount,
-          to_asset_type: ticker.includes('BTC') || ticker.includes('ETH') ? 'crypto' : (ticker.startsWith('CASH') ? 'cash' : 'stock'),
-          fees: fees,
-          platform: document.getElementById('txPlatform').value || null,
-          notes: document.getElementById('txNotes').value || null,
+          transaction_date: txDate,
+          transaction_currency: currency,
+          fees,
+          platform,
+          notes,
           is_short_position: false
         };
-        
-        if (currentTab === 'transfer') {
-          transaction.transaction_type = 'deposit';
-        } else {
+
+        if (currentTab === 'buy') {
+          // BUY: Cash → Asset
+          // from = cash spent, to = asset received
+          if (!total) { alert('Please enter Total spent.'); return; }
           transaction.transaction_type = 'trade';
-          const fromAmount = parseFloat(document.getElementById('txFromAmount').value);
-          transaction.from_ticker = 'USDT-USD';
-          transaction.from_amount = fromAmount;
-          transaction.from_asset_type = 'stablecoin';
-          transaction.exchange_rate = fromAmount / toAmount;
+          transaction.from_ticker      = cashTicker;
+          transaction.from_amount      = total;
+          transaction.from_asset_type  = 'cash';
+          transaction.to_ticker        = ticker;
+          transaction.to_amount        = qty;
+          transaction.to_asset_type    = assetType;
+          transaction.exchange_rate    = total / qty; // price per unit
+
+        } else if (currentTab === 'sell') {
+          // SELL: Asset → Cash
+          // from = asset sold, to = cash received
+          if (!total) { alert('Please enter Total received.'); return; }
+          transaction.transaction_type = 'trade';
+          transaction.from_ticker      = ticker;       // ← asset you're selling
+          transaction.from_amount      = qty;          // ← quantity of asset sold
+          transaction.from_asset_type  = assetType;
+          transaction.to_ticker        = cashTicker;   // ← cash you receive
+          transaction.to_amount        = total;        // ← cash amount received
+          transaction.to_asset_type    = 'cash';
+          transaction.exchange_rate    = total / qty;
+
+        } else if (currentTab === 'transfer') {
+          // TRANSFER IN: external → portfolio (deposit)
+          // TRANSFER OUT: portfolio → external (withdrawal)
+          if (currentTransferDir === 'in') {
+            transaction.transaction_type = 'deposit';
+            transaction.from_ticker      = null;
+            transaction.from_amount      = null;
+            transaction.from_asset_type  = null;
+            transaction.to_ticker        = ticker;
+            transaction.to_amount        = qty;
+            transaction.to_asset_type    = assetType;
+          } else {
+            transaction.transaction_type = 'withdrawal';
+            transaction.from_ticker      = ticker;
+            transaction.from_amount      = qty;
+            transaction.from_asset_type  = assetType;
+            transaction.to_ticker        = null;
+            transaction.to_amount        = null;
+            transaction.to_asset_type    = null;
+          }
         }
-        
+
+        console.log('📤 Inserting transaction:', transaction);
         const { error } = await sb.from('transactions').insert([transaction]);
         if (error) throw error;
-        
-        alert('✅ Transaction added!');
+
+        alert('✅ Transaction added! Prices are refreshing...');
         document.getElementById('transactionModal').style.display = 'none';
         document.getElementById('transactionForm').reset();
-        await refreshData();
+        selectTxCurrency('USD');
+        selectTransferDir('in');
+
+        // FIX: Wait briefly for the DB trigger to recalculate positions,
+        // then refresh. Prices update is async so we show stale-price warning.
+        document.getElementById('summaryCards').innerHTML = '<div class="loading">Recalculating positions…</div>';
+        document.getElementById('positionsTable').innerHTML = '<div class="loading">Updating prices (may take a few seconds)…</div>';
+        setTimeout(() => refreshData(), 3000);
+
       } catch (error) {
         console.error('❌ Transaction error:', error);
         alert('Error: ' + error.message);
@@ -1432,23 +1668,15 @@
       document.getElementById('signupBtn').addEventListener('click', async () => {
         const email = document.getElementById('loginEmail').value;
         const password = document.getElementById('loginPassword').value;
-        if (!email || !password) {
-          showMessage('Enter email and password', 'error');
-          return;
-        }
-        if (password.length < 6) {
-          showMessage('Password must be 6+ characters', 'error');
-          return;
-        }
+        if (!email || !password) { showMessage('Enter email and password', 'error'); return; }
+        if (password.length < 6) { showMessage('Password must be 6+ characters', 'error'); return; }
         await signup(email, password);
       });
       
       document.getElementById('logoutBtn')?.addEventListener('click', logout);
-      
-      // Theme
       document.getElementById('themeToggle')?.addEventListener('click', toggleTheme);
       
-      // Currency
+      // Display currency toggle
       document.querySelectorAll('.currency-btn').forEach(btn => {
         btn.addEventListener('click', function() {
           state.currentCurrency = this.dataset.currency;
@@ -1458,29 +1686,30 @@
         });
       });
       
-      // Refresh
       document.getElementById('refreshBtn')?.addEventListener('click', refreshData);
-      
-      // Snapshot
       document.getElementById('snapshotBtn')?.addEventListener('click', createSnapshot);
       
-      // Modal
+      // Open modal
       document.getElementById('addTransactionBtn')?.addEventListener('click', () => {
         document.getElementById('transactionModal').style.display = 'block';
         document.getElementById('txDate').value = new Date().toISOString().slice(0, 16);
+        // Reset to Buy tab
+        document.querySelectorAll('.tx-tab').forEach(t => t.classList.remove('active'));
+        document.querySelector('.tx-tab[data-tab="buy"]').classList.add('active');
+        updateFormForTab('buy');
+        selectTxCurrency('USD');
       });
       
       document.getElementById('closeModal')?.addEventListener('click', () => {
         document.getElementById('transactionModal').style.display = 'none';
       });
-      
       window.addEventListener('click', (e) => {
         if (e.target.id === 'transactionModal') {
           document.getElementById('transactionModal').style.display = 'none';
         }
       });
       
-      // Tabs
+      // Transaction type tabs
       document.querySelectorAll('.tx-tab').forEach(tab => {
         tab.addEventListener('click', function() {
           document.querySelectorAll('.tx-tab').forEach(t => t.classList.remove('active'));
@@ -1488,35 +1717,39 @@
           updateFormForTab(this.dataset.tab);
         });
       });
+
+      // Transfer direction (In / Out)
+      document.querySelectorAll('.transfer-dir-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+          selectTransferDir(this.dataset.dir);
+        });
+      });
+
+      // Transaction currency selector
+      document.querySelectorAll('.tx-currency-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+          selectTxCurrency(this.dataset.currency);
+        });
+      });
       
-      // Expand button
+      // Expand optional fields
       document.getElementById('expandBtn')?.addEventListener('click', () => {
         const fields = document.getElementById('optionalFields');
-        const btn = document.getElementById('expandBtn');
-        if (fields.style.display === 'none') {
-          fields.style.display = 'block';
-          btn.innerHTML = '<span>−</span> Fees & Notes <span class="optional-tag">(Optional)</span>';
-        } else {
-          fields.style.display = 'none';
-          btn.innerHTML = '<span>+</span> Fees & Notes <span class="optional-tag">(Optional)</span>';
-        }
+        const btn    = document.getElementById('expandBtn');
+        const open   = fields.style.display !== 'none';
+        fields.style.display = open ? 'none' : 'block';
+        btn.innerHTML = (open ? '<span>+</span>' : '<span>−</span>') + ' Fees & Notes <span class="optional-tag">(Optional)</span>';
       });
       
-      // Auto-calculate price
-      document.getElementById('txFromAmount')?.addEventListener('input', () => {
-        const total = parseFloat(document.getElementById('txFromAmount').value) || 0;
-        const qty = parseFloat(document.getElementById('txToAmount').value) || 1;
-        if (total && qty) {
-          document.getElementById('txPricePerCoin').value = (total / qty).toFixed(2);
-        }
+      // Auto-calculate price per unit
+      ['txFromAmount', 'txToAmount'].forEach(id => {
+        document.getElementById(id)?.addEventListener('input', recalcPrice);
       });
-      
-      document.getElementById('txToAmount')?.addEventListener('input', () => {
-        const total = parseFloat(document.getElementById('txFromAmount').value) || 0;
-        const qty = parseFloat(document.getElementById('txToAmount').value) || 1;
-        if (total && qty) {
-          document.getElementById('txPricePerCoin').value = (total / qty).toFixed(2);
-        }
+
+      // Update qty suffix from ticker input
+      document.getElementById('txToTicker')?.addEventListener('input', function() {
+        const suffix = this.value.split('-')[0].toUpperCase() || 'units';
+        document.getElementById('qtySuffix').textContent = suffix;
       });
       
       // Form submit

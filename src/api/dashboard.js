@@ -6,10 +6,6 @@ import {
   getPortfolioSnapshots 
 } from './database.js';
 
-import { fileURLToPath } from 'url';
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 // Update dashboard with latest data
 async function updateDashboard() {
   try {
