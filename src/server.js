@@ -6,6 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getAssetsWithFreshPrices, getOrCreateAsset, searchAssets } from './services/assetService.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import portfolioRouter from './routes/portfolioRoute.js';
 
 // ES6 __dirname equivalent
 const __filename = fileURLToPath(import.meta.url);
@@ -90,144 +91,6 @@ app.post('/api/assets/get-or-create', async (req, res) => {
   } catch (error) {
     console.error('Get/create asset error:', error);
     res.status(500).json({ error: error.message });
-  }
-});
-
-// ============================================
-// PORTFOLIO ENDPOINTS
-// ============================================
-
-/**
- * Get portfolio with fresh prices
- * GET /api/portfolio
- */
-app.get('/api/portfolio', async (req, res) => {
-  try {
-    // TODO: Get user from auth header
-    // For now, get first user's data (development mode)
-    const { data: users, error: usersError } = await supabase
-      .from('profiles')
-      .select('id')
-      .limit(1);
-    
-    if (usersError) {
-      console.error('Error fetching users:', usersError);
-      throw usersError;
-    }
-    
-    if (!users || users.length === 0) {
-      return res.json({
-        positions: [],
-        totalValueUSD: 0,
-        totalCostUSD: 0,
-        totalGainLossUSD: 0,
-        totalGainLossPct: 0,
-        message: 'No users found in database. Please create a user first.'
-      });
-    }
-    
-    const userId = users[0].id;
-    console.log(`📊 Fetching portfolio for user: ${userId}`);
-    
-    // Fetch current positions
-    const { data: positions, error: positionsError } = await supabase
-      .from('current_positions')
-      .select('*')
-      .eq('user_id', userId);
-    
-    if (positionsError) {
-      console.error('Supabase error fetching positions:', positionsError);
-      throw positionsError;
-    }
-    
-    if (!positions || positions.length === 0) {
-      return res.json({
-        positions: [],
-        totalValueUSD: 0,
-        totalCostUSD: 0,
-        totalGainLossUSD: 0,
-        totalGainLossPct: 0,
-        message: 'No positions found. Add some transactions first.'
-      });
-    }
-    
-    // Extract unique tickers
-    const tickers = [...new Set(positions.map(p => p.ticker))];
-    
-    console.log(`📊 Portfolio request for ${positions.length} positions (${tickers.length} unique assets)`);
-    
-    // Get asset metadata with auto-refresh for stale prices
-    const assetMetadata = await getAssetsWithFreshPrices(tickers);
-    
-    // Get exchange rate (USD to THB)
-    // TODO: Fetch live exchange rate from API
-    const exchangeRate = 35.5;
-    
-    // Enrich positions with fresh metadata
-    let totalValueUSD = 0;
-    let totalCostUSD = 0;
-    
-    const enrichedPositions = positions.map(pos => {
-      const asset = assetMetadata[pos.ticker];
-      
-      if (!asset) {
-        console.warn(`⚠️ No metadata for ${pos.ticker}`);
-        return null;
-      }
-      
-      // Calculate current value
-      let currentValue = pos.quantity * (asset.currentPrice || 0);
-      
-      // Convert to USD if needed
-      let valueUSD = currentValue;
-      if (asset.priceCurrency === 'THB') {
-        valueUSD = currentValue / exchangeRate;
-      }
-      
-      // Get cost basis in USD
-      let costUSD = parseFloat(pos.total_cost_basis) || 0;
-      // TODO: Store position currency in database and convert if needed
-      
-      totalValueUSD += valueUSD;
-      totalCostUSD += costUSD;
-      
-      return {
-        ticker: pos.ticker,
-        assetName: asset.assetName || pos.ticker,
-        assetType: asset.assetType || pos.asset_type,
-        quantity: parseFloat(pos.quantity),
-        averageCost: parseFloat(pos.average_cost),
-        totalCostBasis: costUSD,
-        currentPrice: parseFloat(asset.currentPrice || 0),
-        priceCurrency: asset.priceCurrency,
-        currentValue: currentValue,
-        currentValueUSD: valueUSD,
-        unrealizedPnL: valueUSD - costUSD,
-        unrealizedPnLPct: costUSD > 0 ? ((valueUSD - costUSD) / costUSD) * 100 : 0,
-        lastPriceUpdate: asset.lastPriceUpdate,
-        logoUrl: asset.logoUrl
-      };
-    }).filter(p => p !== null);
-    
-    const response = {
-      positions: enrichedPositions,
-      totalValueUSD,
-      totalCostUSD,
-      totalGainLossUSD: totalValueUSD - totalCostUSD,
-      totalGainLossPct: totalCostUSD > 0 ? ((totalValueUSD - totalCostUSD) / totalCostUSD) * 100 : 0,
-      exchangeRate,
-      lastUpdate: new Date().toISOString()
-    };
-    
-    console.log(`✅ Returning portfolio with ${enrichedPositions.length} positions`);
-    res.json(response);
-    
-  } catch (error) {
-    console.error('❌ Portfolio error:', error);
-    res.status(500).json({ 
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
   }
 });
 
@@ -332,6 +195,17 @@ app.get('/api/health', (req, res) => {
       staticPath: path.join(__dirname, 'frontend')
     }
   });
+});
+
+app.use('/api', portfolioRouter);
+
+app.get('/onboarding', (req, res) => {
+  res.sendFile(path.join(__dirname, 'frontend', 'onboarding.html'));
+});
+
+// TEST ENDPOINT - Remove this after debugging
+app.get('/api/test', (req, res) => {
+  res.json({ message: 'Router is working!' });
 });
 
 // ============================================
