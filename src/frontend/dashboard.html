@@ -1002,16 +1002,67 @@
     // Called after every successful login or on page load when already authenticated.
     async function checkOnboardingThenShow() {
       try {
-        const resp = await fetch('/api/portfolio');
+        // Ensure we have a current user
+        if (!currentUser) {
+          console.error('❌ No current user for onboarding check');
+          showDashboard(); // Fallback to dashboard
+          return;
+        }
+
+        console.log('🔍 Checking onboarding status for:', currentUser.email);
+
+        // Get the user's session token (required for RLS)
+        const { data: { session }, error: sessionError } = await sb.auth.getSession();
+        
+        if (sessionError) {
+          console.error('❌ Error getting session:', sessionError);
+          showDashboard(); // Fallback to dashboard on session error
+          return;
+        }
+
+        if (!session?.access_token) {
+          console.error('❌ No session token available - user may need to re-login');
+          // Session expired - force re-login
+          showLogin();
+          return;
+        }
+
+        console.log('✅ Session token obtained');
+
+        // Fetch portfolio data with authentication
+        const url = `/api/portfolio?user_email=${encodeURIComponent(currentUser.email)}`;
+        
+        const resp = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`  // ← RLS auth
+          }
+        });
+
+        if (!resp.ok) {
+          const errorText = await resp.text();
+          throw new Error(`HTTP ${resp.status}: ${errorText}`);
+        }
+
         const data = await resp.json();
+        console.log('📊 Portfolio response:', data);
+
+        // Check if onboarding is required
         if (data.onboarding_required) {
+          console.log('🔄 Onboarding required - redirecting...');
           window.location.href = '/onboarding';
           return;
         }
+
+        // Onboarding complete - show dashboard
+        console.log('✅ Onboarding complete - showing dashboard');
         showDashboard();
+
       } catch (error) {
-        // If the check fails for any reason, fall through to dashboard
-        console.warn('⚠️ Onboarding check failed, showing dashboard anyway:', error);
+        // Handle errors gracefully - don't block the user
+        console.warn('⚠️ Onboarding check failed:', error.message);
+        console.warn('⚠️ Showing dashboard anyway to avoid blocking user');
         showDashboard();
       }
     }
@@ -1089,16 +1140,45 @@
 
     async function fetchPortfolioData() {
       try {
+        // Ensure we have a current user
         if (!currentUser) {
-          console.error('No current user');
+          console.error('❌ No current user');
           return null;
         }
 
-        // Send user email so the backend knows which user is requesting
+        console.log('📊 Fetching portfolio for:', currentUser.email);
+
+        // Get the user's session token (required for RLS)
+        const { data: { session }, error: sessionError } = await sb.auth.getSession();
+        
+        if (sessionError) {
+          console.error('❌ Error getting session:', sessionError);
+          showError('Session error. Please refresh the page.');
+          return null;
+        }
+
+        if (!session?.access_token) {
+          console.error('❌ No session token available');
+          showError('Session expired. Please log in again.');
+          // Force re-login
+          setTimeout(() => {
+            logout();
+          }, 2000);
+          return null;
+        }
+
+        console.log('✅ Session token obtained');
+
+        // Fetch portfolio with authentication
         const url = `/api/portfolio?user_email=${encodeURIComponent(currentUser.email)}`;
         
-        console.log('📊 Fetching portfolio for:', currentUser.email);
-        const response = await fetch(url);
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`  // ← RLS auth
+          }
+        });
         
         if (!response.ok) {
           const errorText = await response.text();
@@ -1106,12 +1186,15 @@
         }
 
         const data = await response.json();
-        console.log('✅ Portfolio data received:', data);
+        console.log('✅ Portfolio data received');
+        console.log('   Positions:', data.positions?.length || 0);
+        console.log('   Total value:', data.summary?.total_value || 0);
+
         return data;
 
       } catch (error) {
         console.error('❌ Error fetching portfolio:', error);
-        showError(error.message);
+        showError(`Failed to load portfolio: ${error.message}`);
         return null;
       }
     }

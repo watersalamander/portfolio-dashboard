@@ -33,64 +33,92 @@ const supabase = createClient(
 );
 
 async function getUserId(req) {
-  // DEBUG: Log everything we receive
-  console.log('[getUserId] DEBUG - Request details:');
-  console.log('  req.query:', req.query);
-  console.log('  req.body:', req.body);
-  console.log('  req.params:', req.params);
-  console.log('  req.headers:', req.headers);
-  
   // Get user email from query parameter
   const userEmail = req.query.user_email || req.body.user_email;
-  console.log('[getUserId] Extracted userEmail:', userEmail);
+  console.log('[getUserId] Looking for user:', userEmail);
   
+  // Try Authorization header (this is the important part!)
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    console.log('[getUserId] Found Bearer token - creating authenticated client');
+    const token = authHeader.replace('Bearer ', '');
+    
+    try {
+      // Create a NEW Supabase client using the user's token
+      const authenticatedSupabase = createClient(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_ANON_KEY,
+        {
+          global: {
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          }
+        }
+      );
+      
+      // Verify the token and get the user
+      const { data: { user }, error: authError } = await authenticatedSupabase.auth.getUser();
+      
+      if (authError) {
+        console.error('[getUserId] Token validation failed:', authError);
+        return null;
+      }
+      
+      if (!user) {
+        console.error('[getUserId] No user from token');
+        return null;
+      }
+      
+      console.log('[getUserId] ✅ Token validated for user:', user.email);
+      
+      // Now query profiles using the authenticated client
+      const { data: profile, error } = await authenticatedSupabase
+        .from('profiles')
+        .select('id, email, display_currency, onboarding_completed')
+        .eq('id', user.id)
+        .maybeSingle();
+      
+      if (error) {
+        console.error('[getUserId] Error fetching profile:', error);
+        return null;
+      }
+      
+      if (profile) {
+        console.log(`[getUserId] ✅ Found profile: ${profile.email}`);
+        return profile;
+      } else {
+        console.warn(`[getUserId] ❌ No profile found for user id: ${user.id}`);
+        return null;
+      }
+      
+    } catch (e) {
+      console.error('[getUserId] Unexpected error:', e);
+      return null;
+    }
+  }
+
+  // Fallback: try email lookup (less secure, but works for dev)
   if (userEmail) {
-    console.log(`[getUserId] Looking up user: ${userEmail}`);
+    console.log('[getUserId] No token - falling back to email lookup (insecure!)');
     const { data: profile, error } = await supabase
       .from('profiles')
       .select('id, email, display_currency, onboarding_completed')
       .eq('email', userEmail)
-      .single();
+      .maybeSingle();
     
     if (error) {
-      console.error('[getUserId] Database error:', error);
+      console.error('[getUserId] Email lookup error:', error);
       return null;
     }
     
     if (profile) {
-      console.log(`[getUserId] ✅ Found user: ${profile.email}`);
+      console.log(`[getUserId] ⚠️ Found user via email (bypassed RLS): ${profile.email}`);
       return profile;
-    } else {
-      console.warn(`[getUserId] ❌ User not found in profiles table: ${userEmail}`);
-      return null;
     }
   }
 
-  // Try Authorization header (production mode)
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    console.log('[getUserId] Trying Bearer token auth...');
-    const token = authHeader.replace('Bearer ', '');
-    try {
-      const { data: { user }, error } = await supabase.auth.getUser(token);
-      if (!error && user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('id, email, display_currency, onboarding_completed')
-          .eq('id', user.id)
-          .single();
-        
-        if (profile) {
-          console.log(`[getUserId] ✅ Found user via token: ${profile.email}`);
-          return profile;
-        }
-      }
-    } catch (e) {
-      console.warn('[getUserId] Auth token validation failed:', e.message);
-    }
-  }
-
-  console.warn('[getUserId] ❌ Could not identify user - no email or token provided');
+  console.warn('[getUserId] ❌ Could not identify user');
   return null;
 }
 
