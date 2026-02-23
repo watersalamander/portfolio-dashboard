@@ -1086,66 +1086,32 @@
         return 35.50;
       }
     }
-    
-    // ============================================
-    // DATA FETCHING
-    // ============================================
+
     async function fetchPortfolioData() {
       try {
-        if (!currentUser) throw new Error('Not logged in');
+        if (!currentUser) {
+          console.error('No current user');
+          return null;
+        }
+
+        // Send user email so the backend knows which user is requesting
+        const url = `/api/portfolio?user_email=${encodeURIComponent(currentUser.email)}`;
         
-        // STEP 1: Update prices server-side (no CORS!)
-        console.log('🔄 Updating prices in database...');
-        await updatePricesInDatabase();
+        console.log('📊 Fetching portfolio for:', currentUser.email);
+        const response = await fetch(url);
         
-        // STEP 2: Fetch positions (prices already updated!)
-        const { data: positions, error: posError } = await sb
-          .from('current_positions')
-          .select('*')
-          .eq('user_id', currentUser.id);
-        
-        if (posError) throw posError;
-        
-        // STEP 3: Fetch snapshots
-        const { data: snapshots, error: snapError } = await sb
-          .from('portfolio_snapshots')
-          .select('*')
-          .eq('user_id', currentUser.id)
-          .order('snapshot_date', { ascending: true });
-        
-        // STEP 4: Get exchange rate
-        const exchangeRate = await getExchangeRate();
-        
-        // STEP 5: Calculate totals (prices are already in database!)
-        let totalValue = 0, totalCostBasis = 0, totalPnL = 0;
-        (positions || []).forEach(pos => {
-          const currentValue = pos.current_value || (pos.current_price * pos.quantity);
-          totalValue += currentValue;
-          totalCostBasis += pos.total_cost_basis;
-          totalPnL += currentValue - pos.total_cost_basis;
-        });
-        
-        console.log('✅ Portfolio loaded:', {
-          positions: positions?.length || 0,
-          totalValue: totalValue.toFixed(2),
-          exchangeRate
-        });
-        
-        return {
-          positions: positions || [],
-          snapshots: snapshots || [],
-          exchangeRate,
-          summary: {
-            totalValue,
-            totalPnL,
-            totalReturnPct: totalCostBasis > 0 ? (totalPnL / totalCostBasis) * 100 : 0,
-            totalCostBasis
-          },
-          lastUpdate: new Date().toISOString()
-        };
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+
+        const data = await response.json();
+        console.log('✅ Portfolio data received:', data);
+        return data;
+
       } catch (error) {
-        console.error('❌ Fetch error:', error);
-        showError('Error loading data: ' + error.message);
+        console.error('❌ Error fetching portfolio:', error);
+        showError(error.message);
         return null;
       }
     }

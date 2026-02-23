@@ -32,24 +32,66 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HELPER: get the authenticated user from the request
-// Falls back to first user in dev mode (matches your current server.js pattern)
-// ─────────────────────────────────────────────────────────────────────────────
 async function getUserId(req) {
-  // If you have auth headers set up, read from there:
-  // const token = req.headers.authorization?.replace('Bearer ', '');
-  // const { data: { user } } = await supabase.auth.getUser(token);
-  // return user?.id;
+  // DEBUG: Log everything we receive
+  console.log('[getUserId] DEBUG - Request details:');
+  console.log('  req.query:', req.query);
+  console.log('  req.body:', req.body);
+  console.log('  req.params:', req.params);
+  console.log('  req.headers:', req.headers);
+  
+  // Get user email from query parameter
+  const userEmail = req.query.user_email || req.body.user_email;
+  console.log('[getUserId] Extracted userEmail:', userEmail);
+  
+  if (userEmail) {
+    console.log(`[getUserId] Looking up user: ${userEmail}`);
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('id, email, display_currency, onboarding_completed')
+      .eq('email', userEmail)
+      .single();
+    
+    if (error) {
+      console.error('[getUserId] Database error:', error);
+      return null;
+    }
+    
+    if (profile) {
+      console.log(`[getUserId] ✅ Found user: ${profile.email}`);
+      return profile;
+    } else {
+      console.warn(`[getUserId] ❌ User not found in profiles table: ${userEmail}`);
+      return null;
+    }
+  }
 
-  // Dev fallback: use first profile
-  const { data: users, error } = await supabase
-    .from('profiles')
-    .select('id, display_currency, onboarding_completed')
-    .limit(1);
+  // Try Authorization header (production mode)
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    console.log('[getUserId] Trying Bearer token auth...');
+    const token = authHeader.replace('Bearer ', '');
+    try {
+      const { data: { user }, error } = await supabase.auth.getUser(token);
+      if (!error && user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('id, email, display_currency, onboarding_completed')
+          .eq('id', user.id)
+          .single();
+        
+        if (profile) {
+          console.log(`[getUserId] ✅ Found user via token: ${profile.email}`);
+          return profile;
+        }
+      }
+    } catch (e) {
+      console.warn('[getUserId] Auth token validation failed:', e.message);
+    }
+  }
 
-  if (error || !users?.length) return null;
-  return users[0];
+  console.warn('[getUserId] ❌ Could not identify user - no email or token provided');
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
