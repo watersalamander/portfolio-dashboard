@@ -888,6 +888,7 @@
     
     let sb = null;
     let currentUser = null;
+    let sessionToken = null;
     let currentTab = 'buy'; // Track current tab
     
     // ============================================
@@ -972,10 +973,13 @@
     // ============================================
     async function checkAuth() {
       try {
-        const { data: { user } } = await sb.auth.getUser();
-        if (user) {
-          currentUser = user;
-          console.log('✅ Authenticated:', user.email);
+        // Get session (includes the JWT we need for API calls)
+        const { data: { session } } = await sb.auth.getSession();
+        if (session && session.user) {
+          currentUser  = session.user;
+          sessionToken = session.access_token;        // ← store JWT
+          console.log('✅ Authenticated:', currentUser.email);
+          console.log('✅ Session token obtained');
           await checkOnboardingThenShow();
         } else {
           showLogin();
@@ -998,86 +1002,48 @@
       refreshData();
     }
 
-    // Checks onboarding status before deciding where to send the user.
-    // Called after every successful login or on page load when already authenticated.
+    // Helper: build auth headers for every API call
+    function apiHeaders() {
+      return sessionToken
+        ? { 'Authorization': `Bearer ${sessionToken}` }
+        : {};
+    }
+
     async function checkOnboardingThenShow() {
       try {
-        // Ensure we have a current user
-        if (!currentUser) {
-          console.error('❌ No current user for onboarding check');
-          showDashboard(); // Fallback to dashboard
-          return;
-        }
-
-        console.log('🔍 Checking onboarding status for:', currentUser.email);
-
-        // Get the user's session token (required for RLS)
-        const { data: { session }, error: sessionError } = await sb.auth.getSession();
-        
-        if (sessionError) {
-          console.error('❌ Error getting session:', sessionError);
-          showDashboard(); // Fallback to dashboard on session error
-          return;
-        }
-
-        if (!session?.access_token) {
-          console.error('❌ No session token available - user may need to re-login');
-          // Session expired - force re-login
-          showLogin();
-          return;
-        }
-
-        console.log('✅ Session token obtained');
-
-        // Fetch portfolio data with authentication
-        const url = `/api/portfolio?user_email=${encodeURIComponent(currentUser.email)}`;
-        
-        const resp = await fetch(url, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`  // ← RLS auth
-          }
+        console.log('🔍 Checking onboarding status for:', currentUser?.email);
+        const resp = await fetch('/api/portfolio', {
+          headers: apiHeaders()                        // ← send Bearer token
         });
-
         if (!resp.ok) {
-          const errorText = await resp.text();
-          throw new Error(`HTTP ${resp.status}: ${errorText}`);
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(`HTTP ${resp.status}: ${JSON.stringify(err)}`);
         }
-
         const data = await resp.json();
-        console.log('📊 Portfolio response:', data);
-
-        // Check if onboarding is required
         if (data.onboarding_required) {
-          console.log('🔄 Onboarding required - redirecting...');
           window.location.href = '/onboarding';
           return;
         }
-
-        // Onboarding complete - show dashboard
-        console.log('✅ Onboarding complete - showing dashboard');
         showDashboard();
-
       } catch (error) {
-        // Handle errors gracefully - don't block the user
-        console.warn('⚠️ Onboarding check failed:', error.message);
-        console.warn('⚠️ Showing dashboard anyway to avoid blocking user');
+        console.warn('⚠️ Onboarding check failed, showing dashboard anyway:', error);
         showDashboard();
       }
     }
-    
+        
     async function login(email, password) {
       try {
         const { data, error } = await sb.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        currentUser = data.user;
+        currentUser  = data.user;
+        sessionToken = data.session?.access_token;    // ← store JWT
         await checkOnboardingThenShow();
       } catch (error) {
         console.error('❌ Login error:', error);
         showMessage(`Login failed: ${error.message}`, 'error');
       }
     }
+
     
     async function signup(email, password) {
       try {
@@ -1140,61 +1106,29 @@
 
     async function fetchPortfolioData() {
       try {
-        // Ensure we have a current user
         if (!currentUser) {
-          console.error('❌ No current user');
+          console.error('No current user');
           return null;
         }
 
         console.log('📊 Fetching portfolio for:', currentUser.email);
 
-        // Get the user's session token (required for RLS)
-        const { data: { session }, error: sessionError } = await sb.auth.getSession();
-        
-        if (sessionError) {
-          console.error('❌ Error getting session:', sessionError);
-          showError('Session error. Please refresh the page.');
-          return null;
-        }
-
-        if (!session?.access_token) {
-          console.error('❌ No session token available');
-          showError('Session expired. Please log in again.');
-          // Force re-login
-          setTimeout(() => {
-            logout();
-          }, 2000);
-          return null;
-        }
-
-        console.log('✅ Session token obtained');
-
-        // Fetch portfolio with authentication
-        const url = `/api/portfolio?user_email=${encodeURIComponent(currentUser.email)}`;
-        
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`  // ← RLS auth
-          }
+        const resp = await fetch('/api/portfolio', {
+          headers: apiHeaders()                        // ← send Bearer token (no user_email in URL)
         });
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`HTTP ${response.status}: ${errorText}`);
+
+        if (!resp.ok) {
+          const errorText = await resp.text();
+          throw new Error(`HTTP ${resp.status}: ${errorText}`);
         }
 
-        const data = await response.json();
-        console.log('✅ Portfolio data received');
-        console.log('   Positions:', data.positions?.length || 0);
-        console.log('   Total value:', data.summary?.total_value || 0);
-
+        const data = await resp.json();
+        console.log('✅ Portfolio data received:', data);
         return data;
 
       } catch (error) {
         console.error('❌ Error fetching portfolio:', error);
-        showError(`Failed to load portfolio: ${error.message}`);
+        showError(error.message);
         return null;
       }
     }

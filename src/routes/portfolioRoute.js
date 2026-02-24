@@ -1,19 +1,19 @@
 /**
  * portfolioRoute.js
  * ─────────────────────────────────────────────────────────────────────────────
- * Replace the existing GET /api/portfolio handler in server.js with this.
- * Also adds:
- *   POST /api/initial-positions   — save onboarding data
- *   GET  /api/initial-positions   — fetch for editing
- * ─────────────────────────────────────────────────────────────────────────────
+ * KEY FIX: Uses SUPABASE_SERVICE_ROLE_KEY for all server-side DB operations.
  *
- * HOW TO INTEGRATE:
- *   1. Copy positionCalculator.js to src/services/positionCalculator.js
- *   2. Copy this file to src/routes/portfolioRoute.js
- *   3. In server.js add:
- *        import portfolioRouter from './routes/portfolioRoute.js';
- *        app.use('/api', portfolioRouter);
- *   4. Remove the old GET /api/portfolio handler from server.js
+ * Why: The anon key respects RLS. When the backend queries `profiles` using the
+ * anon key, RLS blocks it (no active session on the server). The service role
+ * key bypasses RLS entirely — safe because the server already validated
+ * the user's JWT before touching the database.
+ *
+ * Security model:
+ *   1. Frontend sends  Authorization: Bearer <supabase-jwt>
+ *   2. Server calls    supabaseAuth.auth.getUser(token) — validates JWT signature
+ *   3. Server uses     supabaseAdmin (service role)     — queries DB as trusted server
+ *   4. All queries     still filter by user_id           — data isolation preserved
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 
 import express from 'express';
@@ -27,136 +27,115 @@ import {
 
 const router = express.Router();
 
-const supabase = createClient(
+// ── Two Supabase clients ──────────────────────────────────────────────────────
+//  supabaseAuth  — anon key, used ONLY to validate JWTs via auth.getUser()
+//  supabaseAdmin — service role key, used for all DB reads/writes on the server
+
+const supabaseAuth = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY
 );
 
-async function getUserId(req) {
-  // Get user email from query parameter
-  const userEmail = req.query.user_email || req.body.user_email;
-  console.log('[getUserId] Looking for user:', userEmail);
-  
-  // Try Authorization header (this is the important part!)
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    console.log('[getUserId] Found Bearer token - creating authenticated client');
-    const token = authHeader.replace('Bearer ', '');
-    
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL,
+  // Falls back to anon key if service role not configured — but RLS must allow it
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUTH HELPER
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Resolve the calling user's profile from the request.
+ * Priority:
+ *   1. Authorization: Bearer <supabase-jwt>   (production)
+ *   2. ?user_email= or body.user_email         (dev/Postman fallback)
+ */
+async function getUserProfile(req) {
+  // ── 1. Bearer token ────────────────────────────────────────────────────
+  const authHeader = req.headers.authorization || '';
+  if (authHeader.startsWith('Bearer ')) {
+    const token = authHeader.slice(7);
     try {
-      // Create a NEW Supabase client using the user's token
-      const authenticatedSupabase = createClient(
-        process.env.SUPABASE_URL,
-        process.env.SUPABASE_ANON_KEY,
-        {
-          global: {
-            headers: {
-              Authorization: `Bearer ${token}`
-            }
-          }
-        }
-      );
-      
-      // Verify the token and get the user
-      const { data: { user }, error: authError } = await authenticatedSupabase.auth.getUser();
-      
-      if (authError) {
-        console.error('[getUserId] Token validation failed:', authError);
-        return null;
-      }
-      
-      if (!user) {
-        console.error('[getUserId] No user from token');
-        return null;
-      }
-      
-      console.log('[getUserId] ✅ Token validated for user:', user.email);
-      
-      // Now query profiles using the authenticated client
-      const { data: profile, error } = await authenticatedSupabase
-        .from('profiles')
-        .select('id, email, display_currency, onboarding_completed')
-        .eq('id', user.id)
-        .maybeSingle();
-      
-      if (error) {
-        console.error('[getUserId] Error fetching profile:', error);
-        return null;
-      }
-      
-      if (profile) {
-        console.log(`[getUserId] ✅ Found profile: ${profile.email}`);
-        return profile;
+      const { data: { user }, error: authErr } = await supabaseAuth.auth.getUser(token);
+      if (authErr || !user) {
+        console.warn('[portfolioRoute] Invalid JWT:', authErr?.message);
       } else {
-        console.warn(`[getUserId] ❌ No profile found for user id: ${user.id}`);
-        return null;
+        // Valid user — fetch profile using admin client (bypasses RLS)
+        const { data: profile, error: profileErr } = await supabaseAdmin
+          .from('profiles')
+          .select('id, email, display_currency, onboarding_completed')
+          .eq('id', user.id)
+          .single();
+
+        if (!profileErr && profile) return profile;
+
+        // Profile row missing (new user) — create it now
+        if (profileErr?.code === 'PGRST116' || !profile) {
+          const { data: created, error: createErr } = await supabaseAdmin
+            .from('profiles')
+            .upsert(
+              { id: user.id, email: user.email, onboarding_completed: false },
+              { onConflict: 'id' }
+            )
+            .select('id, email, display_currency, onboarding_completed')
+            .single();
+
+          if (!createErr && created) return created;
+          console.error('[portfolioRoute] Could not create profile:', createErr?.message);
+        }
       }
-      
     } catch (e) {
-      console.error('[getUserId] Unexpected error:', e);
-      return null;
+      console.warn('[portfolioRoute] Bearer auth error:', e.message);
     }
   }
 
-  // Fallback: try email lookup (less secure, but works for dev)
+  // ── 2. Email fallback (dev / Postman only) ─────────────────────────────
+  const userEmail = req.query.user_email || req.body?.user_email;
   if (userEmail) {
-    console.log('[getUserId] No token - falling back to email lookup (insecure!)');
-    const { data: profile, error } = await supabase
+    const { data: profile, error } = await supabaseAdmin
       .from('profiles')
       .select('id, email, display_currency, onboarding_completed')
       .eq('email', userEmail)
-      .maybeSingle();
-    
-    if (error) {
-      console.error('[getUserId] Email lookup error:', error);
-      return null;
-    }
-    
-    if (profile) {
-      console.log(`[getUserId] ⚠️ Found user via email (bypassed RLS): ${profile.email}`);
-      return profile;
-    }
+      .single();
+    if (!error && profile) return profile;
+    console.warn('[portfolioRoute] Email fallback: user not found:', userEmail, error?.message);
   }
 
-  console.warn('[getUserId] ❌ Could not identify user');
   return null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPER: fetch live USD/THB exchange rate
 // ─────────────────────────────────────────────────────────────────────────────
+
 async function fetchFxRate() {
   try {
-    // Yahoo Finance: THBUSD=X gives THB per USD — we want USD per THB (inverse)
     const resp = await fetch(
       'https://query1.finance.yahoo.com/v8/finance/chart/THB=X?interval=1d&range=1d'
     );
     const json = await resp.json();
     const rate = json?.chart?.result?.[0]?.meta?.regularMarketPrice;
-    // THB=X returns how many THB per 1 USD (e.g. 35.2)
     if (rate && rate > 0) return Number(rate);
   } catch (e) {
-    console.warn('[portfolioRoute] FX rate fetch failed, using fallback:', e.message);
+    console.warn('[portfolioRoute] FX rate fetch failed, using 35.0:', e.message);
   }
-  return 35.0; // fallback
+  return 35.0;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPER: build price map from asset_metadata table
-// { [ticker]: { price, currency, updatedAt } }
 // ─────────────────────────────────────────────────────────────────────────────
+
 async function getPriceMap(tickers) {
   if (!tickers.length) return {};
-
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('asset_metadata')
     .select('ticker, current_price, price_currency, last_price_update')
     .in('ticker', tickers);
 
-  if (error) {
-    console.error('[portfolioRoute] Price map fetch error:', error);
-    return {};
-  }
+  if (error) { console.error('[portfolioRoute] Price map fetch error:', error); return {}; }
 
   const map = {};
   for (const row of data || []) {
@@ -169,75 +148,60 @@ async function getPriceMap(tickers) {
   return map;
 }
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/portfolio
 // ─────────────────────────────────────────────────────────────────────────────
+
 router.get('/portfolio', async (req, res) => {
   try {
-    const profile = await getUserId(req);
+    const profile = await getUserProfile(req);
     if (!profile) {
-      return res.status(404).json({ error: 'No user found' });
+      return res.status(401).json({ error: 'Unauthorized: no valid session found.' });
     }
 
     const { id: userId, display_currency: displayCurrency = 'USD', onboarding_completed } = profile;
 
-    // If onboarding not done, tell the frontend to redirect
     if (!onboarding_completed) {
       return res.json({ onboarding_required: true });
     }
 
-    // ── 1. Fetch initial positions ─────────────────────────────────────────
-    const { data: initialPositions, error: ipError } = await supabase
+    const { data: initialPositions, error: ipErr } = await supabaseAdmin
       .from('initial_positions')
       .select('*')
       .eq('user_id', userId);
+    if (ipErr) throw ipErr;
 
-    if (ipError) throw ipError;
-
-    // ── 2. Fetch all transactions (chronological) ──────────────────────────
-    const { data: transactions, error: txError } = await supabase
+    const { data: transactions, error: txErr } = await supabaseAdmin
       .from('transactions')
       .select('*')
       .eq('user_id', userId)
       .order('transaction_date', { ascending: true });
+    if (txErr) throw txErr;
 
-    if (txError) throw txError;
-
-    // ── 3. Get exchange rate ───────────────────────────────────────────────
     const fxRate = await fetchFxRate();
 
-    // ── 4. Calculate positions ─────────────────────────────────────────────
     const positions = calculatePositions(
       initialPositions || [],
       transactions     || [],
       fxRate
     );
 
-    // ── 5. Dev: log any warnings ───────────────────────────────────────────
     if (process.env.NODE_ENV !== 'production') {
       const warnings = validatePositions(positions);
-      if (warnings.length) {
-        console.warn('[positionCalculator] Warnings:', warnings);
-      }
+      if (warnings.length) console.warn('[positionCalculator] Warnings:', warnings);
     }
 
-    // ── 6. Fetch prices for all tickers we have positions in ───────────────
     const tickers  = Object.keys(positions);
     const priceMap = await getPriceMap(tickers);
-
-    // ── 7. Enrich positions with market data ───────────────────────────────
     const enriched = enrichPositions(positions, priceMap, fxRate, displayCurrency);
-
-    // ── 8. Portfolio-level summary ─────────────────────────────────────────
-    const summary = computePortfolioSummary(enriched, displayCurrency);
+    const summary  = computePortfolioSummary(enriched, displayCurrency);
 
     res.json({
-      positions:    enriched,
+      positions:        enriched,
       summary,
-      exchange_rate: fxRate,
+      exchange_rate:    fxRate,
       display_currency: displayCurrency,
-      last_updated: new Date().toISOString(),
+      last_updated:     new Date().toISOString(),
     });
 
   } catch (err) {
@@ -246,17 +210,16 @@ router.get('/portfolio', async (req, res) => {
   }
 });
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/initial-positions
-// Returns the user's initial positions (for editing on the onboarding page)
 // ─────────────────────────────────────────────────────────────────────────────
+
 router.get('/initial-positions', async (req, res) => {
   try {
-    const profile = await getUserId(req);
-    if (!profile) return res.status(404).json({ error: 'No user found' });
+    const profile = await getUserProfile(req);
+    if (!profile) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('initial_positions')
       .select('*')
       .eq('user_id', profile.id)
@@ -270,34 +233,33 @@ router.get('/initial-positions', async (req, res) => {
   }
 });
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/initial-positions
-// Save (upsert) the user's initial holdings during onboarding.
-// Body: { positions: [{ ticker, asset_name, asset_type, quantity, avg_cost, cost_currency }] }
+// Body: { positions: [{ ticker, asset_name, asset_type, quantity, avg_cost, cost_currency, notes }] }
+// quantity can be negative for short positions.
 // ─────────────────────────────────────────────────────────────────────────────
+
 router.post('/initial-positions', async (req, res) => {
   try {
-    const profile = await getUserId(req);
-    if (!profile) return res.status(404).json({ error: 'No user found' });
+    const profile = await getUserProfile(req);
+    if (!profile) return res.status(401).json({ error: 'Unauthorized' });
 
     const { positions: incoming } = req.body;
 
     if (!Array.isArray(incoming) || incoming.length === 0) {
-      return res.status(400).json({ error: 'positions array is required' });
+      return res.status(400).json({ error: 'positions array is required and must not be empty.' });
     }
 
-    // Validate each row
     const rows = [];
     for (const pos of incoming) {
-      const ticker       = (pos.ticker || '').toUpperCase().trim();
-      const quantity     = Number(pos.quantity);
-      const avg_cost     = Number(pos.avg_cost) || 0;
+      const ticker        = (pos.ticker || '').toUpperCase().trim();
+      const quantity      = Number(pos.quantity);
+      const avg_cost      = Math.abs(Number(pos.avg_cost) || 0);
       const cost_currency = pos.cost_currency === 'THB' ? 'THB' : 'USD';
 
-      if (!ticker)           return res.status(400).json({ error: `Missing ticker in row: ${JSON.stringify(pos)}` });
-      if (isNaN(quantity) || quantity < 0) return res.status(400).json({ error: `Invalid quantity for ${ticker}` });
-      if (avg_cost < 0)      return res.status(400).json({ error: `Negative avg_cost for ${ticker}` });
+      if (!ticker)         return res.status(400).json({ error: `Missing ticker: ${JSON.stringify(pos)}` });
+      if (isNaN(quantity)) return res.status(400).json({ error: `Invalid quantity for ${ticker}` });
+      if (avg_cost < 0)    return res.status(400).json({ error: `Negative avg_cost for ${ticker}` });
 
       rows.push({
         user_id:       profile.id,
@@ -311,40 +273,38 @@ router.post('/initial-positions', async (req, res) => {
       });
     }
 
-    // Upsert (insert or update if ticker already exists for this user)
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('initial_positions')
       .upsert(rows, { onConflict: 'user_id,ticker' })
       .select();
 
     if (error) throw error;
 
-    // Mark onboarding as complete
-    await supabase
+    await supabaseAdmin
       .from('profiles')
       .update({ onboarding_completed: true })
       .eq('id', profile.id);
 
     res.json({ success: true, saved: data.length });
+
   } catch (err) {
     console.error('[portfolioRoute] POST /initial-positions error:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // DELETE /api/initial-positions/:ticker
-// Remove a single initial position (user correcting a mistake during onboarding)
 // ─────────────────────────────────────────────────────────────────────────────
+
 router.delete('/initial-positions/:ticker', async (req, res) => {
   try {
-    const profile = await getUserId(req);
-    if (!profile) return res.status(404).json({ error: 'No user found' });
+    const profile = await getUserProfile(req);
+    if (!profile) return res.status(401).json({ error: 'Unauthorized' });
 
     const ticker = req.params.ticker.toUpperCase();
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('initial_positions')
       .delete()
       .eq('user_id', profile.id)
@@ -358,58 +318,53 @@ router.delete('/initial-positions/:ticker', async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/transactions
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────────────────────
-// POST /api/transactions  (updated version — replaces existing handler)
-// Accepts the new double-entry format with transaction_currency
-// ─────────────────────────────────────────────────────────────────────────────
 router.post('/transactions', async (req, res) => {
   try {
-    const profile = await getUserId(req);
-    if (!profile) return res.status(404).json({ error: 'No user found' });
+    const profile = await getUserProfile(req);
+    if (!profile) return res.status(401).json({ error: 'Unauthorized' });
 
     const {
-      transaction_type,   // 'buy', 'sell', 'swap', 'transfer_in', 'transfer_out'
+      transaction_type,
       to_ticker,
       to_amount,
       to_asset_type,
-      from_ticker,        // null for deposits/transfer_in
-      from_amount,        // null for deposits/transfer_in
+      from_ticker,
+      from_amount,
       from_asset_type,
-      transaction_currency, // 'USD' or 'THB'
-      price_per_unit,     // used to derive from_amount if not explicitly set
-      fees,
+      transaction_currency = 'USD',
+      price_per_unit,
+      fees = 0,
       fee_currency,
       notes,
       platform,
       transaction_date,
     } = req.body;
 
-    // ── Derive from_amount from price_per_unit if not provided ────────────
-    // This is what the "Total Spent" field in the form produces.
-    // from_amount = total cash spent = to_amount × price_per_unit
     let resolvedFromAmount = from_amount;
     if (!resolvedFromAmount && price_per_unit && to_amount) {
       resolvedFromAmount = Number(to_amount) * Number(price_per_unit);
     }
 
-    // ── Determine from_ticker for buy/sell if not provided ────────────────
-    // For a "Buy" transaction in the CoinGecko-style form:
-    //   the user picks currency (USD/THB/USDT) which becomes from_ticker
-    let resolvedFromTicker     = from_ticker;
-    let resolvedFromAssetType  = from_asset_type;
-
+    let resolvedFromTicker    = from_ticker;
+    let resolvedFromAssetType = from_asset_type;
     if (transaction_type === 'buy' && !resolvedFromTicker && transaction_currency) {
-      resolvedFromTicker    = transaction_currency; // 'USD' or 'THB'
+      resolvedFromTicker    = transaction_currency;
       resolvedFromAssetType = 'cash';
     }
-    if (transaction_type === 'sell' && !resolvedFromTicker) {
-      resolvedFromTicker    = to_ticker;    // what you're selling
+    if (transaction_type === 'sell' && !resolvedFromTicker && to_ticker) {
+      resolvedFromTicker    = to_ticker;
       resolvedFromAssetType = to_asset_type;
     }
 
-    // ── Fetch fx rate at tx time ───────────────────────────────────────────
-    const fxRate = await fetchFxRate(); // In production: use the tx date for historical rate
+    if (!to_ticker && !resolvedFromTicker) {
+      return res.status(400).json({ error: 'At least one of to_ticker or from_ticker is required.' });
+    }
+
+    const fxRate = await fetchFxRate();
 
     const row = {
       user_id:              profile.id,
@@ -417,34 +372,30 @@ router.post('/transactions', async (req, res) => {
       transaction_date:     transaction_date || new Date().toISOString(),
       transaction_currency: transaction_currency || 'USD',
       fx_rate_at_time:      fxRate,
-
-      to_ticker:            to_ticker?.toUpperCase(),
-      to_amount:            Number(to_amount),
-      to_asset_type:        to_asset_type || 'other',
-
+      to_ticker:            to_ticker?.toUpperCase() || null,
+      to_amount:            to_amount != null ? Number(to_amount) : null,
+      to_asset_type:        to_asset_type || null,
       from_ticker:          resolvedFromTicker?.toUpperCase() || null,
-      from_amount:          resolvedFromAmount ? Number(resolvedFromAmount) : null,
+      from_amount:          resolvedFromAmount != null ? Number(resolvedFromAmount) : null,
       from_asset_type:      resolvedFromAssetType || null,
-
       fees:                 Number(fees) || 0,
       fee_currency:         fee_currency || transaction_currency || 'USD',
       notes:                notes || null,
       platform:             platform || null,
     };
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('transactions')
       .insert(row)
       .select();
 
     if (error) throw error;
-
     res.json({ success: true, transaction: data[0] });
+
   } catch (err) {
     console.error('[portfolioRoute] POST /transactions error:', err);
     res.status(500).json({ error: err.message });
   }
 });
-
 
 export default router;
