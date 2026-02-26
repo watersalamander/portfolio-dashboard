@@ -619,7 +619,7 @@
           <div class="summary-stat">
             <label>Total Positions</label>
             <div class="val" id="summaryCount">—</div>
-            <div class="sub">assets across all types</div>
+            <div class="sub" id="summaryCountSub">across all tickers</div>
           </div>
           <div class="summary-stat">
             <label>Est. Cost Basis (USD)</label>
@@ -661,6 +661,7 @@
   // ── State ────────────────────────────────────────────────────────────────
   let currentStep   = 1;
   let positions     = [];      // array of position objects
+  let fxRate = 31.0; 
   let authToken     = null;    // JWT for API calls
   let currentUser   = null;
   let acTimeout     = null;    // autocomplete debounce timer
@@ -792,17 +793,14 @@
     if (isNaN(qty) || qty < 0)    return showAlert('step1Alert', 'error', 'Please enter a valid quantity (≥ 0).');
     if (isNaN(avgCost) || avgCost < 0) return showAlert('step1Alert', 'error', 'Please enter a valid average cost (≥ 0).');
 
-    // Check for duplicate (same ticker + same position type)
-    const dupIdx = positions.findIndex(p => p.ticker === ticker && p.position_type === posType);
-    if (dupIdx !== -1) {
-      // Update the existing row in-place
-      positions[dupIdx] = { ticker, asset_name: assetName, asset_type: assetType, position_type: posType, quantity: qty, avg_cost: avgCost, cost_currency: currency, notes };
-      showAlert('step1Alert', 'success', `Updated existing ${ticker} (${posType}) position.`);
-    } else {
-      positions.push({ ticker, asset_name: assetName, asset_type: assetType, position_type: posType, quantity: qty, avg_cost: avgCost, cost_currency: currency, notes });
-      showAlert('step1Alert', 'success', `Added ${ticker} – ${qty} units @ ${currency} ${avgCost}.`);
-    }
+    // Always push a new row — same ticker is allowed (different batches/notes)
+    positions.push({
+      ticker, asset_name: assetName, asset_type: assetType,
+      position_type: posType, quantity: qty, avg_cost: avgCost,
+      cost_currency: currency, notes,
+    });
 
+    showAlert('step1Alert', 'success', `Added ${ticker} — ${qty} units @ ${currency} ${avgCost}.`);
     clearForm();
     renderTable();
     setTimeout(() => clearAlert('step1Alert'), 3000);
@@ -876,15 +874,24 @@
   function goToStep2() {
     if (positions.length === 0) return;
 
-    // Compute summary stats
-    const usdTotal   = positions
-      .filter(p => p.cost_currency === 'USD')
-      .reduce((sum, p) => sum + p.quantity * p.avg_cost, 0);
-    const types      = [...new Set(positions.map(p => p.asset_type))];
+    // BUG 2 FIX: Convert ALL positions to USD before summing.
+    //   Old code only summed positions where cost_currency === 'USD',
+    //   completely skipping THB positions.
+    const totalUSD = positions.reduce((sum, p) => {
+      const cost = p.quantity * p.avg_cost;
+      if (p.cost_currency === 'THB') {
+        return sum + (cost / fxRate);   // convert THB → USD using live rate
+      }
+      return sum + cost;                // already USD
+    }, 0);
 
-    document.getElementById('summaryCount').textContent = positions.length;
-    document.getElementById('summaryCostUSD').textContent = '$' + fmtNum(usdTotal);
-    document.getElementById('summaryTypes').textContent = types.join(', ');
+    const uniqueTickers = new Set(positions.map(p => p.ticker));
+    const types         = [...new Set(positions.map(p => p.asset_type))];
+
+    document.getElementById('summaryCount').textContent    = positions.length;
+    document.getElementById('summaryCountSub').textContent = `across ${uniqueTickers.size} unique ticker${uniqueTickers.size !== 1 ? 's' : ''}`;
+    document.getElementById('summaryCostUSD').textContent  = '$' + fmtNum(totalUSD);
+    document.getElementById('summaryTypes').textContent    = types.join(', ');
 
     renderTable(true);
     setStep(2);

@@ -121,7 +121,7 @@ async function fetchFxRate() {
   } catch (e) {
     console.warn('[portfolioRoute] FX rate fetch failed, using 35.0:', e.message);
   }
-  return 35.0;
+  return 30.0;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -273,12 +273,19 @@ router.post('/initial-positions', async (req, res) => {
       });
     }
 
-    const { data, error } = await supabaseAdmin
+    // Full replace: wipe existing rows, re-insert the complete list.
+    // This preserves multiple rows per ticker (each with distinct notes).
+    const { error: deleteErr } = await supabaseAdmin
       .from('initial_positions')
-      .upsert(rows, { onConflict: 'user_id,ticker' })
-      .select();
+      .delete()
+      .eq('user_id', profile.id);
+    if (deleteErr) throw deleteErr;
 
-    if (error) throw error;
+    const { data, error: insertErr } = await supabaseAdmin
+      .from('initial_positions')
+      .insert(rows)
+      .select();
+    if (insertErr) throw insertErr;
 
     await supabaseAdmin
       .from('profiles')
